@@ -1,0 +1,6 @@
+﻿fastapi
+groq
+langchain-core
+langgraph
+plotly
+uvicorn
