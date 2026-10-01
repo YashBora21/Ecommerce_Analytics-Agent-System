@@ -1,0 +1,7 @@
+{
+  "name": "ecommerce-analytics-agent",
+  "private": true,
+  "scripts": {
+    "dev": "python dev.py"
+  }
+}

@@ -1,4 +1,4 @@
-import json
+﻿import json
 import unittest
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -50,8 +50,8 @@ class QueryGraphTests(unittest.TestCase):
         )
 
         self.assertEqual(result["final_answer"], "The sample contains 5,000 orders.")
-        self.assertEqual(result["agent_steps"], 2)
-        self.assertEqual(len(result["query_results"]), 1)
+        self.assertEqual(result["steps"], 2)
+        self.assertEqual(len(result["evidence"]), 1)
 
     def test_agent_can_request_second_sql_query(self) -> None:
         planner_calls = 0
@@ -84,8 +84,8 @@ class QueryGraphTests(unittest.TestCase):
         )
 
         self.assertEqual(result["final_answer"], "Revenue is 100 across 5 orders.")
-        self.assertEqual(len(result["query_results"]), 2)
-        self.assertEqual(result["agent_steps"], 4)
+        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["steps"], 4)
 
     def test_agent_can_calculate_statistics_from_sql_rows(self) -> None:
         assessment_calls = 0
@@ -126,8 +126,8 @@ class QueryGraphTests(unittest.TestCase):
         ).invoke({"question": "What is median delivery time?"})
 
         self.assertEqual(result["final_answer"], "Median delivery time is 3 days.")
-        self.assertEqual(len(result["query_results"]), 2)
-        self.assertEqual(result["agent_steps"], 3)
+        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["steps"], 3)
 
     def test_agent_can_create_chart_from_sql_rows(self) -> None:
         assessment_calls = 0
@@ -155,11 +155,10 @@ class QueryGraphTests(unittest.TestCase):
                             "x_column": "customer_state",
                             "y_column": "revenue",
                             "title": "Revenue by state",
+                            "final_answer": "Revenue by state is shown in the chart.",
                         },
                     }
                 )
-            self.assertIn("Chart already generated: yes", messages[1]["content"])
-            return assessment_json("answer", "Revenue by state is shown in the chart.")
 
         def fake_chart(request):
             self.assertEqual(request["csv_data"], "customer_state,revenue\nSao Paulo,100")
@@ -174,7 +173,123 @@ class QueryGraphTests(unittest.TestCase):
 
         self.assertEqual(result["final_answer"], "Revenue by state is shown in the chart.")
         self.assertIn('"type":"bar"', result["chart"])
-        self.assertEqual(result["agent_steps"], 3)
+        self.assertEqual(result["steps"], 2)
+
+    def test_truncated_chart_data_is_requeried_at_a_coarser_grain(self) -> None:
+        planner_calls = 0
+        assessment_calls = 0
+
+        def fake_llm(messages):
+            nonlocal planner_calls, assessment_calls
+            system = messages[0]["content"]
+            if system == GUARDRAIL_SYSTEM_PROMPT:
+                return guardrail_json()
+            if system == SQL_SYSTEM_PROMPT:
+                planner_calls += 1
+                if planner_calls == 1:
+                    return json.dumps({"sql": "SELECT order_date AS date, SUM(order_value) AS revenue FROM orders GROUP BY order_date", "reason": "daily trend"})
+                self.assertIn("coarser", messages[-1]["content"])
+                return json.dumps({"sql": "SELECT substr(order_date, 1, 7) AS month, SUM(order_value) AS revenue FROM orders GROUP BY month", "reason": "monthly trend"})
+            assessment_calls += 1
+            if assessment_calls == 1:
+                return assessment_json("query_sql", goal="Use a coarser monthly grouping with at most 100 points")
+            return json.dumps({
+                "action": "create_chart",
+                "reason": "Complete monthly trend is ready",
+                "arguments": {
+                    "chart_type": "line",
+                    "x_column": "month",
+                    "y_column": "revenue",
+                    "value_column": "",
+                    "path_columns": [],
+                    "title": "Monthly revenue trend",
+                    "final_answer": "The chart shows the monthly revenue trend.",
+                },
+            })
+
+        def fake_sql(query):
+            if "substr" in query:
+                return "month,revenue\n2017-01,100\n2017-02,120"
+            return "date,revenue\n2017-01-01,10\n[Results truncated]"
+
+        result = build_query_graph(
+            fake_llm,
+            fake_sql,
+            chart_runner=lambda request: '{"data":[{"type":"scatter"}],"layout":{}}',
+        ).invoke({"question": "Show revenue trend over time as a line chart"})
+
+        self.assertEqual(result["final_answer"], "The chart shows the monthly revenue trend.")
+        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["steps"], 4)
+        self.assertTrue(result["chart"])
+
+    def test_chart_failure_retries_once_then_returns_text_evidence(self) -> None:
+        chart_calls = 0
+
+        def fake_llm(messages):
+            system = messages[0]["content"]
+            if system == GUARDRAIL_SYSTEM_PROMPT:
+                return guardrail_json()
+            if system == SQL_SYSTEM_PROMPT:
+                return json.dumps({"sql": "SELECT customer_state, SUM(order_value) AS revenue FROM orders GROUP BY customer_state", "reason": "chart data"})
+            return json.dumps(
+                {
+                    "action": "create_chart",
+                    "reason": "Chart requested",
+                    "arguments": {
+                        "chart_type": "bar",
+                        "x_column": "customer_state",
+                        "y_column": "missing_column",
+                        "value_column": "",
+                        "path_columns": [],
+                        "title": "Revenue",
+                        "final_answer": "Revenue by state is shown in the chart.",
+                    },
+                }
+            )
+
+        def reject_chart(request):
+            nonlocal chart_calls
+            chart_calls += 1
+            return "Rejected: Column not found: missing_column"
+
+        result = build_query_graph(
+            fake_llm,
+            lambda query: "customer_state,revenue\nSao Paulo,100",
+            chart_runner=reject_chart,
+        ).invoke({"question": "Chart revenue by state"})
+
+        self.assertEqual(chart_calls, 2)
+        self.assertIn("could not build the chart after one retry", result["final_answer"])
+        self.assertIn("Sao Paulo,100", result["final_answer"])
+
+    def test_invalid_assessment_is_corrected_once(self) -> None:
+        assessment_calls = 0
+
+        def fake_llm(messages):
+            nonlocal assessment_calls
+            system = messages[0]["content"]
+            if system == GUARDRAIL_SYSTEM_PROMPT:
+                return guardrail_json()
+            if system == SQL_SYSTEM_PROMPT:
+                return json.dumps({"sql": "SELECT '2017-11' AS month, 60594.4 AS total_sales", "reason": "top month"})
+            assessment_calls += 1
+            if assessment_calls == 1:
+                return assessment_json("answer", "")
+            self.assertIn("failed validation", messages[-1]["content"])
+            return assessment_json("answer", "November 2017 had the highest sales at 60,594.40.")
+
+        result = build_query_graph(
+            fake_llm,
+            lambda query: "month,total_sales\n2017-11,60594.4",
+        ).invoke({"question": "Which month had the highest sales?"})
+
+        self.assertEqual(assessment_calls, 2)
+        self.assertEqual(
+            result["final_answer"],
+            "November 2017 had the highest sales at 60,594.40.",
+        )
+        self.assertEqual(result["steps"], 2)
 
     def test_invalid_next_action_is_rejected(self) -> None:
         def fake_llm(messages):
@@ -190,6 +305,40 @@ class QueryGraphTests(unittest.TestCase):
         )
 
         self.assertIn("invalid next action", result["final_answer"])
+
+    def test_repeated_sql_is_rejected_and_corrected(self) -> None:
+        planner_calls = 0
+        assessment_calls = 0
+        sql_calls = 0
+
+        def fake_llm(messages):
+            nonlocal planner_calls, assessment_calls
+            system = messages[0]["content"]
+            if system == GUARDRAIL_SYSTEM_PROMPT:
+                return guardrail_json()
+            if system == SQL_SYSTEM_PROMPT:
+                planner_calls += 1
+                sql = "SELECT order_date, SUM(order_value) AS revenue FROM orders GROUP BY order_date"
+                if planner_calls == 3:
+                    self.assertIn("exact query was already run", messages[-1]["content"])
+                    sql = "SELECT substr(order_date, 1, 7) AS month, SUM(order_value) AS revenue FROM orders GROUP BY month"
+                return json.dumps({"sql": sql, "reason": "trend"})
+            assessment_calls += 1
+            if assessment_calls == 1:
+                return assessment_json("query_sql", goal="Use a coarser monthly grouping")
+            return assessment_json("answer", "Monthly evidence is ready.")
+
+        def fake_sql(query):
+            nonlocal sql_calls
+            sql_calls += 1
+            return "month,revenue\n2017-01,100"
+
+        result = build_query_graph(fake_llm, fake_sql).invoke({"question": "Show a trend"})
+
+        self.assertEqual(planner_calls, 3)
+        self.assertEqual(sql_calls, 2)
+        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["final_answer"], "Monthly evidence is ready.")
 
     def test_retry_counter_resets_after_successful_round(self) -> None:
         planner_calls = 0
@@ -222,8 +371,8 @@ class QueryGraphTests(unittest.TestCase):
 
         self.assertEqual(result["final_answer"], "Completed with both results.")
         self.assertEqual(result["sql_tries"], 0)
-        self.assertEqual(len(result["query_results"]), 2)
-        self.assertEqual(result["agent_steps"], 5)
+        self.assertEqual(len(result["evidence"]), 2)
+        self.assertEqual(result["steps"], 5)
 
     def test_step_cap_returns_collected_evidence(self) -> None:
         def fake_llm(messages):
@@ -235,7 +384,7 @@ class QueryGraphTests(unittest.TestCase):
             return assessment_json("query_sql", goal="Get another metric")
 
         result = build_query_graph(fake_llm, lambda query: "orders\n5000").invoke(
-            {"question": "Complex analysis", "agent_steps": MAX_AGENT_STEPS - 1}
+            {"question": "Complex analysis"}
         )
 
         self.assertIn("evidence collected so far", result["final_answer"])
@@ -340,4 +489,6 @@ class ThreadMemoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
 

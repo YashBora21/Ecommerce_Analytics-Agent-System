@@ -32,7 +32,6 @@ Set `GROQ_API_KEY` and optionally `GROQ_MODEL` using `.env.example` as a referen
 
 The LangGraph routes greetings and out-of-scope questions before SQL generation, retries rejected SQL at most three times, and tracks a five-step agent ceiling. When the caller reuses a `thread_id`, memory keeps the latest three conversation pairs, a rolling summary of older turns, and the last successful SQL for accurate follow-ups.
 
-FastAPI endpoints are not implemented yet.
 
 
 
@@ -50,4 +49,38 @@ After each successful query, a structured assessment decides whether the collect
 
 ## Milestone 7: Plotly charts
 
-`backend/tools/chart.py` creates bar, line, scatter, or pie charts from complete SQL results. The LLM chooses whether a chart is useful and supplies its type and columns; code validates that choice and returns Plotly JSON alongside the grounded text answer.
+`backend/tools/chart.py` creates bar, line, scatter, pie, heatmap, or treemap charts from complete SQL results. The LLM chooses whether a chart is useful and supplies its type and columns; code validates that choice and returns Plotly JSON alongside the grounded text answer. Heatmaps use long-format x/y/value rows, treemaps use hierarchy/value rows, and a rejected chart gets one correction attempt before returning the collected text evidence with a clear note.
+
+
+## Milestone 8: agent module split
+
+The query agent is split by responsibility: `state.py` owns state and limits, `llm.py` owns Groq calls, `memory.py` owns conversation context, `decision.py` validates model-selected actions, `routing.py` owns graph routes, `nodes/` contains node factories, and `graph.py` only wires the workflow. `agent.py` remains a small compatibility entry point and `backend.agent` exports `ask()`. A `begin` node resets per-turn fields while checkpointed conversation memory remains available for follow-ups.
+
+
+## Milestone 9: FastAPI
+
+Run the backend with:
+
+```powershell
+uvicorn backend.app:app --reload
+```
+
+`GET /api/health` checks the API and read-only SQLite access. `POST /api/query` accepts `question` and an optional `thread_id`, then returns the grounded answer, Plotly chart JSON when present, the reusable thread ID, and supporting evidence.
+
+
+## Request logging
+
+Each graph node logs its start and end in the Uvicorn terminal, including the route, action, SQL, error, and cumulative Groq token usage. Every `/api/query` response includes `usage.input_tokens`, `usage.output_tokens`, and `usage.total_tokens`. Set `LOG_LEVEL` in `.env` to change verbosity.
+
+
+## Frontend
+
+Start both servers from one terminal:
+
+```powershell
+npm run dev
+```
+
+This uses Python's standard library launcher in `dev.py`; no npm packages are required. Press Ctrl+C to stop both servers.
+
+Open `http://127.0.0.1:5500`. The frontend calls the API at `http://127.0.0.1:8000`, preserves its `thread_id` in session storage for follow-ups, renders Plotly responses, and displays per-request token usage.

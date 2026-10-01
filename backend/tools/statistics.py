@@ -7,7 +7,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 
-OPERATIONS = {"mean", "median", "min", "max", "stdev", "variance", "percentile", "correlation"}
+SUPPORTED_OPERATIONS = {"mean", "median", "min", "max", "stdev", "variance", "percentile", "correlation"}
 
 
 def _numbers(rows: list[dict[str, str]], column: str) -> list[float]:
@@ -54,7 +54,7 @@ def calculate_statistics(
             raise ValueError("Statistics require complete SQL results")
 
         operation = operation.lower().strip()
-        if operation not in OPERATIONS:
+        if operation not in SUPPORTED_OPERATIONS:
             raise ValueError(f"Unsupported operation: {operation}")
 
         rows = list(csv.DictReader(io.StringIO(csv_data)))
@@ -124,6 +124,7 @@ def run_statistics(
     if not result["ok"]:
         return f"Rejected: {result['error']}"
     return json.dumps(result, separators=(",", ":"))
+
 
 
 

@@ -1,4 +1,4 @@
-SCHEMA_AND_METRICS = """
+﻿SCHEMA_AND_METRICS = """
 SQLite table: orders
 
 Columns:
@@ -63,6 +63,10 @@ Rules:
 - Use clear aliases for calculated columns.
 - Round displayed monetary values to two decimals.
 - Add LIMIT 50 to detailed row listings. Aggregate queries do not need a LIMIT.
+- Chart queries must return at most 100 rows; choose a readable time grain or top-N grouping instead of returning hundreds of points.
+- For time trends, prefer monthly grouping unless the user explicitly requests daily or weekly detail.
+- For heatmaps, return x, y, and one numeric value column in long format, one row per x/y pair.
+- For treemaps, return hierarchy columns from broadest to narrowest plus one numeric value column.
 - Do not invent columns or values.
 """.strip()
 
@@ -76,6 +80,7 @@ Rules:
 - Do not add facts that are absent from the SQL result.
 - Describe this as sample/anonymized ecommerce data, not current company performance.
 - Preserve units and distinguish order_value from payment_value.
+
 """.strip()
 
 MEMORY_SUMMARY_PROMPT = """
@@ -87,7 +92,7 @@ Do not invent details.
 RESULT_ASSESSMENT_PROMPT = f"""
 You decide whether SQL evidence fully answers an ecommerce analytics question.
 
-{SCHEMA_AND_METRICS}
+{SCHEMA_AND_METRICS}    
 
 Return JSON with exactly these top-level fields:
 - action: answer, query_sql, calculate_statistics, or create_chart
@@ -98,9 +103,26 @@ Action arguments:
 - answer: final_answer
 - query_sql: next_query_goal
 - calculate_statistics: choose operation from mean, median, min, max, stdev, variance, percentile, or correlation; provide column, second_column when needed, and percentile when needed
-- create_chart: choose chart_type from bar, line, scatter, or pie; provide x_column, y_column, and title
+- create_chart: choose chart_type from bar, line, scatter, pie, heatmap, or treemap; provide x_column and y_column for ordinary charts, value_column for heatmaps, or path_columns plus value_column for treemaps; provide title and a final_answer grounded in the same evidence
+- Never state a count of distinct values (categories, regions, etc.) unless that exact count appears as a number in the SQL result.
+ Do not tally rows yourself.
+-do not create any hypothetical data by you own which not return by answer
+Use only supplied evidence. If results are truncated or too large for the requested chart, choose query_sql with a goal for a coarser grouping or top-N result; never repeat the same SQL. Request statistics only when required numeric rows already exist in a complete SQL result.
 
-Use only supplied evidence. Request statistics only when required numeric rows already exist in a complete SQL result. Select create_chart when the user requested one or a chart materially improves the answer. Never select create_chart when the prompt says a chart was already generated.
+Select create_chart whenever the user explicitly asked for one, OR whenever
+BOTH of these hold: the result has 3+ rows, AND those rows represent a
+comparison across categories, a trend over time, or a distribution across
+buckets/scores. When both hold, you MUST choose create_chart — a correct
+text answer is not sufficient reason to skip the chart.
+
+Keywords that signal a chart is expected even without the word "chart":
+compare, across, distribution, breakdown, trend, over time, by region,
+by category, relationship between.
+
+Pick the chart type to match the shape: time-based -> line; categorical
+comparison -> bar; share-of-whole with few categories -> pie; distribution
+across buckets -> bar; relationship between two numeric columns -> scatter.
+
+Never select create_chart when the prompt says a chart was already generated.
 """.strip()
-
 

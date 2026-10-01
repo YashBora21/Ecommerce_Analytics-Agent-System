@@ -3,4 +3,5 @@ groq
 langchain-core
 langgraph
 plotly
+python-dotenv
 uvicorn
