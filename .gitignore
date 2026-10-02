@@ -2,3 +2,5 @@
 *.py[cod]
 .env
 backend/db/*.tmp
+backend/db/*.db
+data/*.csv

@@ -2,7 +2,7 @@
 
 from groq import GroqError
 
-from backend.agent.decision import parse_action
+from backend.agent.decision import chart_required, parse_action
 from backend.agent.memory import format_evidence
 from backend.agent.prompt import RESULT_ASSESSMENT_PROMPT
 from backend.agent.state import LlmCall, QueryState
@@ -32,6 +32,10 @@ def make_assess_result(llm_call: LlmCall, remember):
                 try:
                     action = parse_action(json.loads(response))
                     if action["name"] == "answer":
+                        if chart_required(state):
+                            raise ValueError(
+                                "the evidence would be clearer as a chart; choose create_chart"
+                            )
                         return {
                             **remember(state, action["args"]["final_answer"]),
                             "action": action,

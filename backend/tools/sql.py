@@ -8,7 +8,7 @@ from .sql_core import execute_sql
 
 @tool
 def run_sql(query: str) -> str:
-    """Run one validated, read-only SQL query against the orders table."""
+    """Run one validated, read-only SQL query against the Olist tables."""
     result = execute_sql(query)
     if not result["ok"]:
         return f"Rejected: {result['error']}"

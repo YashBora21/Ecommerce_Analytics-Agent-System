@@ -423,7 +423,7 @@ class QueryGraphTests(unittest.TestCase):
             lambda messages: self.fail("LLM should not run for greeting"),
             lambda query: self.fail("SQL should not run"),
         ).invoke({"question": "Hello!"})
-        self.assertIn("anonymized ecommerce sample", greeting["final_answer"])
+        self.assertIn("Olist ecommerce dataset", greeting["final_answer"])
 
         outside = build_query_graph(
             lambda messages: guardrail_json(False),

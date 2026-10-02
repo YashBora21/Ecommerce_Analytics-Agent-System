@@ -6,13 +6,13 @@ Evidence = dict[str, str]
 LlmCall = Callable[[list[Message]], str]
 SqlRunner = Callable[[str], str]
 
-MAX_SQL_TRIES = 3
+MAX_SQL_TRIES = 5
 MAX_AGENT_STEPS = 5
 MAX_CHART_TRIES = 2
 MAX_RECENT_MESSAGES = 6
 
 GREETING_REPLY = (
-    "Hi! I can answer questions about the anonymized ecommerce sample, including "
+    "Hi! I can answer questions about the Olist ecommerce dataset, including "
     "orders, revenue, products, customers, sellers, payments, reviews, and delivery."
 )
 OUT_OF_SCOPE_REPLY = (

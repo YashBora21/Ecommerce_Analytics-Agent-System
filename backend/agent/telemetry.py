@@ -56,8 +56,8 @@ def logged_node(name, node):
             update.get("steps", state.get("steps", 0)),
             route,
             action.get("name", ""),
-            sql[:160],
-            error[:160],
+            sql,
+            error,
             get_usage(),
         )
         return update

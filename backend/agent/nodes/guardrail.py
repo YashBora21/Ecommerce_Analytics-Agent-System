@@ -5,12 +5,7 @@ from groq import GroqError
 
 from backend.agent.memory import recent_context
 from backend.agent.prompt import GUARDRAIL_SYSTEM_PROMPT
-from backend.agent.state import (
-    GREETING_REPLY,
-    OUT_OF_SCOPE_REPLY,
-    LlmCall,
-    QueryState,
-)
+from backend.agent.state import GREETING_REPLY, OUT_OF_SCOPE_REPLY, LlmCall, QueryState
 
 
 def _is_greeting(question: str) -> bool:

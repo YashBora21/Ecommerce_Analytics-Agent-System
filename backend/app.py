@@ -1,8 +1,10 @@
-import json
+﻿import json
 import uuid
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.agent import ask
@@ -76,4 +78,8 @@ def query(request: QueryRequest, agent=Depends(get_agent)) -> QueryResponse:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except (KeyError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=500, detail="Agent returned an invalid response") from error
+
+
+frontend_dir = Path(__file__).resolve().parents[1] / "frontend"
+app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 

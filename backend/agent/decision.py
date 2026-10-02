@@ -1,7 +1,46 @@
 ﻿from backend.tools.chart import SUPPORTED_CHARTS
 from backend.tools.statistics import SUPPORTED_OPERATIONS
 
+import csv
+import io
+
 ACTIONS = {"answer", "query_sql", "calculate_statistics", "create_chart"}
+
+
+def chart_required(state: dict) -> bool:
+    """Enforce charts from evidence shape, not special-case questions."""
+    if state.get("chart"):
+        return False
+    question = state.get("question", "").lower()
+    if "no chart" in question or "text only" in question:
+        return False
+
+    evidence = state.get("evidence", [])
+    operations = ('"operation":"correlation"', '"operation":"linear_regression"')
+    if any(
+        item.get("kind") == "statistics"
+        and any(operation in item.get("result", "") for operation in operations)
+        for item in evidence
+    ):
+        return True
+
+    sql_results = [
+        item["result"] for item in evidence if item.get("kind", "sql") == "sql"
+    ]
+    if not sql_results:
+        return False
+    rows = list(csv.DictReader(io.StringIO(sql_results[-1])))
+    if len(rows) < 3 or not 2 <= len(rows[0]) <= 3:
+        return False
+
+    numeric_columns = 0
+    for column in rows[0]:
+        try:
+            [float(row[column]) for row in rows if row[column] != ""]
+            numeric_columns += 1
+        except (TypeError, ValueError):
+            pass
+    return 0 < numeric_columns < len(rows[0])
 
 
 def _text(args, key, required=True):
@@ -29,8 +68,8 @@ def _check_statistics(args):
     column = _text(args, "column")
     second_column = _text(args, "second_column", False)
     percentile = args.get("percentile")
-    if operation == "correlation" and not second_column:
-        raise ValueError("correlation requires second_column")
+    if operation in {"correlation", "linear_regression"} and not second_column:
+        raise ValueError(f"{operation} requires second_column")
     if operation == "percentile" and not isinstance(percentile, (int, float)):
         raise ValueError("percentile requires a number")
     return {

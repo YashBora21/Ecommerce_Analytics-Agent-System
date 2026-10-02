@@ -1,7 +1,8 @@
 ﻿fastapi
-groq
+groq>=0.37,<1
 langchain-core
 langgraph
 plotly
+psycopg[binary]
 python-dotenv
 uvicorn

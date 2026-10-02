@@ -1,4 +1,4 @@
-﻿const API = "http://127.0.0.1:8000";
+﻿const API = window.location.origin;
 const form = document.querySelector("#question-form");
 const input = document.querySelector("#question");
 const send = document.querySelector("#send");
@@ -86,3 +86,4 @@ document.querySelectorAll(".examples button").forEach((button) => {
 });
 
 checkHealth();
+

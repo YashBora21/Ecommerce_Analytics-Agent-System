@@ -1,27 +1,25 @@
-﻿# Ecommerce dataset
+# Olist ecommerce dataset
 
-`ecommerce_sales_analytics_5000.csv` is a deterministic 5,000-order sample derived from the [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
+This directory contains the complete Brazilian E-Commerce Public Dataset by Olist, not the earlier 5,000-order derived sample.
 
-The source contains anonymized commercial orders from Brazil between 2016 and 2018 and is licensed under CC BY-NC-SA 4.0. This derived dataset is intended for non-commercial use under the same license.
+## Source files
 
-## Sampling and grain
+- `olist_orders_dataset.csv`: 99,441 orders
+- `olist_customers_dataset.csv`: order-level customer records and stable customer IDs
+- `olist_order_items_dataset.csv`: 112,650 item positions with product, seller, price, and freight
+- `olist_order_payments_dataset.csv`: 103,886 payment transactions
+- `olist_order_reviews_dataset.csv`: 99,224 review/order records
+- `olist_products_dataset.csv`: 32,951 products
+- `olist_sellers_dataset.csv`: 3,095 sellers
+- `olist_geolocation_dataset.csv`: 1,000,163 zip-prefix coordinate observations
+- `product_category_name_translation.csv`: Portuguese-to-English category names
 
-- One row represents one order.
-- Orders are selected by sorting the SHA-256 hash of `order_id` and taking the first 5,000, producing a stable sample across the full source date range.
-- `quantity` counts order-item rows; Olist has no separate unit-quantity field.
-- Item, freight, and payment values are summed per order.
-- `order_value` equals `item_value + freight_value`.
-- For orders containing multiple categories or sellers, `product_category` and `seller_id` identify the contributor with the highest item value.
-- For split payments, `payment_method` and `payment_installments` come from the largest payment; `payment_value` includes all payments.
-- `review_score` is the mean when an order has multiple review records.
-- `delivery_days` is elapsed time from purchase to customer delivery, expressed in days.
+## Important grains
 
-## Missing-value conventions
+Orders, items, payments, and reviews have different grains. Items, payments, and reviews can each contain multiple rows for one order. Aggregate each child table to one row per order before combining its values with another child table; otherwise joins can multiply rows and overstate totals.
 
-The CSV has no empty cells. Missing source facts use explicit values instead of invented business data:
+`customer_id` identifies the customer record attached to one order, while `customer_unique_id` identifies a buyer across orders. Product sales use item `price`; freight is separate; paid value comes from `payment_value`.
 
-- `not_available` means a canceled or unavailable order has no product or seller record.
-- `review_score = 0` means no review was submitted; rating calculations must use scores from 1 through 5.
-- `delivered_date = not_delivered` and `delivery_days = -1` mean the order was not delivered; delivery calculations must use `delivery_days >= 0`.
-- Customer and seller state abbreviations are expanded to full Brazilian state names.
+Blank source fields are imported as SQL `NULL`. State values remain the original two-letter Brazilian codes. Source timestamps cover 2016-2018, so relative date questions must use the latest dataset timestamp rather than the current date.
 
+Source: Brazilian E-Commerce Public Dataset by Olist. Follow the source license and terms for redistribution or commercial use.

@@ -7,7 +7,10 @@ from typing import Any
 from langchain_core.tools import tool
 
 
-SUPPORTED_OPERATIONS = {"mean", "median", "min", "max", "stdev", "variance", "percentile", "correlation"}
+SUPPORTED_OPERATIONS = {
+    "mean", "median", "min", "max", "stdev", "variance", "percentile",
+    "correlation", "linear_regression",
+}
 
 
 def _numbers(rows: list[dict[str, str]], column: str) -> list[float]:
@@ -76,20 +79,31 @@ def calculate_statistics(
             if percentile is None:
                 raise ValueError("percentile value is required")
             value = _percentile(first_values, percentile)
-        else:
+        elif operation == "correlation":
             if not second_column:
                 raise ValueError("second_column is required for correlation")
             second_values = _numbers(rows, second_column)
             if len(first_values) != len(second_values):
                 raise ValueError("Correlation columns must have the same number of values")
             value = statistics.correlation(first_values, second_values)
+        else:
+            if not second_column:
+                raise ValueError("second_column is required for linear_regression")
+            second_values = _numbers(rows, second_column)
+            if len(first_values) != len(second_values):
+                raise ValueError("Regression columns must have the same number of values")
+            regression = statistics.linear_regression(first_values, second_values)
+            value = {
+                "slope": round(regression.slope, 6),
+                "intercept": round(regression.intercept, 6),
+            }
 
         return {
             "ok": True,
             "operation": operation,
             "column": column,
             "second_column": second_column or None,
-            "value": round(value, 6),
+            "value": round(value, 6) if isinstance(value, float) else value,
             "count": len(first_values),
             "error": None,
         }

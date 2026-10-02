@@ -1,0 +1,140 @@
+[
+  {
+    "name": "installments",
+    "status": 200,
+    "seconds": 5.81,
+    "answer": "No, a higher installment count does not reliably mean a higher order value. While some higher installment counts (e.g., 8, 10, 20, 24) show higher average order values, many others (e.g., 7, 9, 12, 13, 14, 17, 18) have lower averages than lower installment counts, indicating no consistent positive relationship.",
+    "thread_id": "case-4",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT payment_installments AS installments,\n       COUNT(*) AS order_count,\n       ROUND(AVG(order_value), 2) AS avg_order_value\nFROM orders\nWHERE payment_installments IS NOT NULL\nGROUP BY payment_installments\nORDER BY payment_installments;",
+        "result": "installments,order_count,avg_order_value\n1,2481,121.68\n2,587,132.37\n3,520,143.56\n4,317,152.6\n5,270,149.64\n6,211,206.02\n7,87,179.82\n8,193,326.47\n9,26,210.86\n10,284,373.93\n12,7,259.97\n13,1,135.17\n14,2,144.85\n15,5,269.11\n17,1,172.22\n18,1,236.04\n20,5,612.69\n24,2,854.28"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2371,
+      "output_tokens": 892,
+      "total_tokens": 3263
+    }
+  },
+  {
+    "name": "delivery_stats",
+    "status": 200,
+    "seconds": 5.41,
+    "answer": "The delivery times range from a minimum of 1.02 days to a maximum of 99.66 days, with an average delivery time of 12.44 days.",
+    "thread_id": "case-5",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT MIN(delivery_days) AS min_delivery_days,\n       MAX(delivery_days) AS max_delivery_days,\n       ROUND(AVG(delivery_days),2) AS avg_delivery_days\nFROM orders\nWHERE delivery_days >= 0;",
+        "result": "min_delivery_days,max_delivery_days,avg_delivery_days\n1.02,99.66,12.44"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2226,
+      "output_tokens": 557,
+      "total_tokens": 2783
+    }
+  },
+  {
+    "name": "status_compare",
+    "status": 200,
+    "seconds": 0.93,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 198994, Requested 1280. Please try again in 1m58.368s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "case-6",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  {
+    "name": "payments",
+    "status": 200,
+    "seconds": 3.53,
+    "answer": "I could not build a valid query within the allowed attempts. Please rephrase the question.",
+    "thread_id": "case-7",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 566,
+      "output_tokens": 118,
+      "total_tokens": 684
+    }
+  },
+  {
+    "name": "correlation",
+    "status": 200,
+    "seconds": 0.75,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199670, Requested 936. Please try again in 4m21.792s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "case-8",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  {
+    "name": "health",
+    "status": 200,
+    "seconds": 0.77,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199668, Requested 932. Please try again in 4m19.2s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "case-9",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  {
+    "name": "monthly",
+    "status": 200,
+    "seconds": 0.77,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199666, Requested 927. Please try again in 4m16.176s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "monthly-thread-2",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  {
+    "name": "follow_up",
+    "status": 200,
+    "seconds": 0.8,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199664, Requested 1589. Please try again in 9m1.295999999s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "monthly-thread-2",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  {
+    "name": "missing_order",
+    "status": 200,
+    "seconds": 0.75,
+    "answer": "Could not classify question: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01m0cp3xa0e7t88sbdv6hy28hw` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199663, Requested 1445. Please try again in 7m58.656s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "thread_id": "case-12",
+    "chart": null,
+    "evidence": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  }
+]

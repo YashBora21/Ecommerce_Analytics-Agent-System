@@ -1,130 +1,106 @@
-﻿import csv
+import csv
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CSV_PATH = PROJECT_ROOT / "data" / "ecommerce_sales_analytics_5000.csv"
+DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_DB_PATH = Path(__file__).with_name("ecommerce.db")
 
-ORDER_COLUMNS = [
-    "order_id",
-    "order_date",
-    "order_status",
-    "customer_id",
-    "customer_city",
-    "customer_state",
-    "product_category",
-    "seller_id",
-    "seller_state",
-    "quantity",
-    "distinct_products",
-    "item_value",
-    "freight_value",
-    "order_value",
-    "payment_method",
-    "payment_installments",
-    "payment_value",
-    "review_score",
-    "estimated_delivery_date",
-    "delivered_date",
-    "delivery_days",
-]
+FILES = {
+    "category_translation": ("product_category_name_translation.csv", ["product_category_name", "product_category_name_english"]),
+    "customers": ("olist_customers_dataset.csv", ["customer_id", "customer_unique_id", "customer_zip_code_prefix", "customer_city", "customer_state"]),
+    "geolocation": ("olist_geolocation_dataset.csv", ["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng", "geolocation_city", "geolocation_state"]),
+    "products": ("olist_products_dataset.csv", ["product_id", "product_category_name", "product_name_lenght", "product_description_lenght", "product_photos_qty", "product_weight_g", "product_length_cm", "product_height_cm", "product_width_cm"]),
+    "sellers": ("olist_sellers_dataset.csv", ["seller_id", "seller_zip_code_prefix", "seller_city", "seller_state"]),
+    "orders": ("olist_orders_dataset.csv", ["order_id", "customer_id", "order_status", "order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date", "order_delivered_customer_date", "order_estimated_delivery_date"]),
+    "order_items": ("olist_order_items_dataset.csv", ["order_id", "order_item_id", "product_id", "seller_id", "shipping_limit_date", "price", "freight_value"]),
+    "payments": ("olist_order_payments_dataset.csv", ["order_id", "payment_sequential", "payment_type", "payment_installments", "payment_value"]),
+    "reviews": ("olist_order_reviews_dataset.csv", ["review_id", "order_id", "review_score", "review_comment_title", "review_comment_message", "review_creation_date", "review_answer_timestamp"]),
+}
 
-CREATE_DATABASE_SQL = """
-CREATE TABLE orders (
-    order_id TEXT PRIMARY KEY,
-    order_date TEXT NOT NULL,
-    order_status TEXT NOT NULL,
-    customer_id TEXT NOT NULL,
-    customer_city TEXT NOT NULL,
-    customer_state TEXT NOT NULL,
-    product_category TEXT NOT NULL,
-    seller_id TEXT NOT NULL,
-    seller_state TEXT NOT NULL,
-    quantity INTEGER NOT NULL CHECK (quantity >= 0),
-    distinct_products INTEGER NOT NULL CHECK (distinct_products >= 0),
-    item_value REAL NOT NULL CHECK (item_value >= 0),
-    freight_value REAL NOT NULL CHECK (freight_value >= 0),
-    order_value REAL NOT NULL CHECK (order_value >= 0),
-    payment_method TEXT NOT NULL,
-    payment_installments INTEGER NOT NULL CHECK (payment_installments >= 0),
-    payment_value REAL NOT NULL CHECK (payment_value >= 0),
-    review_score REAL NOT NULL CHECK (review_score BETWEEN 0 AND 5),
-    estimated_delivery_date TEXT NOT NULL,
-    delivered_date TEXT NOT NULL,
-    delivery_days REAL NOT NULL CHECK (delivery_days >= -1)
-) STRICT;
-
-CREATE INDEX idx_orders_date ON orders(order_date);
+SCHEMA = """
+PRAGMA foreign_keys = ON;
+CREATE TABLE category_translation (product_category_name TEXT PRIMARY KEY, product_category_name_english TEXT NOT NULL) STRICT;
+CREATE TABLE customers (customer_id TEXT PRIMARY KEY, customer_unique_id TEXT NOT NULL, customer_zip_code_prefix INTEGER NOT NULL, customer_city TEXT NOT NULL, customer_state TEXT NOT NULL) STRICT;
+CREATE TABLE geolocation (geolocation_zip_code_prefix INTEGER NOT NULL, geolocation_lat REAL NOT NULL, geolocation_lng REAL NOT NULL, geolocation_city TEXT NOT NULL, geolocation_state TEXT NOT NULL) STRICT;
+CREATE TABLE products (product_id TEXT PRIMARY KEY, product_category_name TEXT, product_name_length INTEGER, product_description_length INTEGER, product_photos_qty INTEGER, product_weight_g REAL, product_length_cm REAL, product_height_cm REAL, product_width_cm REAL) STRICT;
+CREATE TABLE sellers (seller_id TEXT PRIMARY KEY, seller_zip_code_prefix INTEGER NOT NULL, seller_city TEXT NOT NULL, seller_state TEXT NOT NULL) STRICT;
+CREATE TABLE orders (order_id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES customers(customer_id), order_status TEXT NOT NULL, order_purchase_timestamp TEXT NOT NULL, order_approved_at TEXT, order_delivered_carrier_date TEXT, order_delivered_customer_date TEXT, order_estimated_delivery_date TEXT NOT NULL) STRICT;
+CREATE TABLE order_items (order_id TEXT NOT NULL REFERENCES orders(order_id), order_item_id INTEGER NOT NULL, product_id TEXT NOT NULL REFERENCES products(product_id), seller_id TEXT NOT NULL REFERENCES sellers(seller_id), shipping_limit_date TEXT NOT NULL, price REAL NOT NULL CHECK (price >= 0), freight_value REAL NOT NULL CHECK (freight_value >= 0), PRIMARY KEY (order_id, order_item_id)) STRICT;
+CREATE TABLE payments (order_id TEXT NOT NULL REFERENCES orders(order_id), payment_sequential INTEGER NOT NULL, payment_type TEXT NOT NULL, payment_installments INTEGER NOT NULL CHECK (payment_installments >= 0), payment_value REAL NOT NULL CHECK (payment_value >= 0), PRIMARY KEY (order_id, payment_sequential)) STRICT;
+CREATE TABLE reviews (review_id TEXT NOT NULL, order_id TEXT NOT NULL REFERENCES orders(order_id), review_score INTEGER NOT NULL CHECK (review_score BETWEEN 1 AND 5), review_comment_title TEXT, review_comment_message TEXT, review_creation_date TEXT NOT NULL, review_answer_timestamp TEXT NOT NULL, PRIMARY KEY (review_id, order_id)) STRICT;
+CREATE INDEX idx_customers_unique ON customers(customer_unique_id);
+CREATE INDEX idx_customers_state ON customers(customer_state);
+CREATE INDEX idx_geolocation_zip ON geolocation(geolocation_zip_code_prefix);
+CREATE INDEX idx_orders_customer ON orders(customer_id);
+CREATE INDEX idx_orders_purchase ON orders(order_purchase_timestamp);
 CREATE INDEX idx_orders_status ON orders(order_status);
-CREATE INDEX idx_orders_category ON orders(product_category);
-CREATE INDEX idx_orders_customer_state ON orders(customer_state);
-CREATE INDEX idx_orders_seller_state ON orders(seller_state);
+CREATE INDEX idx_items_product ON order_items(product_id);
+CREATE INDEX idx_items_seller ON order_items(seller_id);
+CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE INDEX idx_reviews_order ON reviews(order_id);
+CREATE INDEX idx_products_category ON products(product_category_name);
 """
 
-
-def read_orders(csv_path: Path) -> list[dict[str, str]]:
-    """Read the CSV and fail early if its expected shape has changed."""
-    with csv_path.open(encoding="utf-8", newline="") as source:
-        reader = csv.DictReader(source)
-        if reader.fieldnames != ORDER_COLUMNS:
-            raise ValueError(f"Unexpected CSV columns: {reader.fieldnames}")
-        orders = list(reader)
-
-    if not orders:
-        raise ValueError("CSV contains no orders")
-    if any(not value for order in orders for value in order.values()):
-        raise ValueError("CSV contains empty values")
-    if len({order["order_id"] for order in orders}) != len(orders):
-        raise ValueError("CSV contains duplicate order IDs")
-
-    return orders
+TARGET_COLUMNS = {
+    "products": ["product_id", "product_category_name", "product_name_length", "product_description_length", "product_photos_qty", "product_weight_g", "product_length_cm", "product_height_cm", "product_width_cm"]
+}
 
 
-def insert_orders(connection: sqlite3.Connection, orders: list[dict[str, str]]) -> None:
-    """Create the schema and insert every order in one transaction."""
-    connection.executescript(CREATE_DATABASE_SQL)
-    placeholders = ", ".join("?" for _ in ORDER_COLUMNS)
-    connection.executemany(
-        f"INSERT INTO orders VALUES ({placeholders})",
-        ([order[column] for column in ORDER_COLUMNS] for order in orders),
-    )
+def import_csv(connection: sqlite3.Connection, table: str, data_dir: Path) -> int:
+    filename, source_columns = FILES[table]
+    target_columns = TARGET_COLUMNS.get(table, source_columns)
+    placeholders = ", ".join("?" for _ in source_columns)
+    sql = f"INSERT INTO {table} ({', '.join(target_columns)}) VALUES ({placeholders})"
+
+    with (data_dir / filename).open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.reader(source)
+        header = next(reader, None)
+        if header != source_columns:
+            raise ValueError(f"Unexpected columns in {filename}: {header}")
+        count = 0
+        batch = []
+        for row in reader:
+            if len(row) != len(source_columns):
+                raise ValueError(f"Malformed row in {filename} at line {count + 2}")
+            batch.append([value if value != "" else None for value in row])
+            count += 1
+            if len(batch) == 10_000:
+                connection.executemany(sql, batch)
+                batch.clear()
+        if batch:
+            connection.executemany(sql, batch)
+    if not count:
+        raise ValueError(f"{filename} contains no rows")
+    return count
 
 
-def validate_database(connection: sqlite3.Connection, expected_count: int) -> None:
-    order_count, incorrect_totals = connection.execute(
-        """
-        SELECT
-            COUNT(*),
-            SUM(ABS(order_value - item_value - freight_value) > 0.011)
-        FROM orders
-        """
-    ).fetchone()
+def prepare_database(data_dir: Path = DATA_DIR, db_path: Path = DEFAULT_DB_PATH) -> None:
+    """Import the complete relational Olist dataset into a validated SQLite file."""
+    temporary_path = db_path.with_suffix(".db.tmp")
+    temporary_path.unlink(missing_ok=True)
+    counts = {}
+    try:
+        with closing(sqlite3.connect(temporary_path)) as connection, connection:
+            connection.executescript(SCHEMA)
+            for table in FILES:
+                counts[table] = import_csv(connection, table, data_dir)
+            violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise ValueError(f"Foreign-key validation failed: {violations[:5]}")
+            for table, expected in counts.items():
+                actual = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                if actual != expected:
+                    raise ValueError(f"Row-count validation failed for {table}")
+        temporary_path.replace(db_path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
-    if order_count != expected_count or incorrect_totals:
-        raise ValueError(
-            "Database validation failed: "
-            f"orders={order_count}, incorrect_totals={incorrect_totals}"
-        )
-
-
-def prepare_database(
-    csv_path: Path = DEFAULT_CSV_PATH,
-    db_path: Path = DEFAULT_DB_PATH,
-) -> None:
-    """Build a validated database without risking the current working copy."""
-    temporary_db_path = db_path.with_suffix(".db.tmp")
-    temporary_db_path.unlink(missing_ok=True)
-    orders = read_orders(csv_path)
-
-    with closing(sqlite3.connect(temporary_db_path)) as connection, connection:
-        insert_orders(connection, orders)
-        validate_database(connection, len(orders))
-
-    temporary_db_path.replace(db_path)
-    print(f"Created {db_path} with {len(orders)} validated orders")
+    summary = ", ".join(f"{table}={count}" for table, count in counts.items())
+    print(f"Created {db_path}: {summary}")
 
 
 if __name__ == "__main__":

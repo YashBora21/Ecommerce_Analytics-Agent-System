@@ -1,14 +1,21 @@
-﻿import re
+﻿import os
+import re
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
 
 DB_FILE = Path(__file__).resolve().parents[1] / "db" / "ecommerce.db"
+load_dotenv(DB_FILE.parents[2] / ".env")
+
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 1_000
-DEFAULT_TIMEOUT = 2.0
+DEFAULT_TIMEOUT = 15.0
 
 ALLOWED_ACTIONS = {
     sqlite3.SQLITE_SELECT,
@@ -35,7 +42,6 @@ def check_sql(sql: str) -> str:
         raise ValueError("Only one SQL statement is allowed")
     if not re.match(r"(?:SELECT|WITH)\b", query, re.IGNORECASE):
         raise ValueError("Only SELECT queries are allowed")
-
     return query
 
 
@@ -69,9 +75,35 @@ def open_readonly(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def execute_postgres(
+    query: str,
+    database_url: str,
+    limit: int,
+    timeout: float,
+) -> dict[str, Any]:
+    """Execute a query in a read-only PostgreSQL transaction."""
+    with psycopg.connect(database_url, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SET TRANSACTION READ ONLY")
+            cursor.execute("SELECT set_config('statement_timeout', %s, true)", (str(int(timeout * 1_000)),))
+            cursor.execute(query)
+            fetched = cursor.fetchmany(limit + 1)
+            columns = [description.name for description in cursor.description or []]
+
+    rows = [dict(row) for row in fetched[:limit]]
+    return {
+        "ok": True,
+        "columns": columns,
+        "rows": rows,
+        "row_count": len(rows),
+        "truncated": len(fetched) > limit,
+        "error": None,
+    }
+
+
 def execute_sql(
     sql: str,
-    path: Path = DB_FILE,
+    path: Path | None = None,
     limit: int = DEFAULT_LIMIT,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -83,14 +115,17 @@ def execute_sql(
         if timeout <= 0:
             raise ValueError("timeout must be positive")
 
-        connection = open_readonly(path)
+        database_url = os.getenv("DATABASE_URL") if path is None else None
+        if database_url:
+            return execute_postgres(query, database_url, limit, timeout)
+
+        connection = open_readonly(path or DB_FILE)
         try:
             deadline = time.monotonic() + timeout
             connection.set_progress_handler(
                 lambda: int(time.monotonic() >= deadline),
                 1_000,
             )
-
             connection.execute(f"EXPLAIN QUERY PLAN {query}").fetchall()
             cursor = connection.execute(query)
             fetched = cursor.fetchmany(limit + 1)
@@ -107,7 +142,7 @@ def execute_sql(
             "truncated": len(fetched) > limit,
             "error": None,
         }
-    except (ValueError, FileNotFoundError, sqlite3.Error, sqlite3.Warning) as error:
+    except (ValueError, FileNotFoundError, sqlite3.Error, sqlite3.Warning, psycopg.Error) as error:
         return {
             "ok": False,
             "columns": [],
@@ -116,3 +151,4 @@ def execute_sql(
             "truncated": False,
             "error": str(error),
         }
+

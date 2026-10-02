@@ -1,0 +1,1096 @@
+[
+  {
+    "case": 1,
+    "name": "total_orders",
+    "question": "How many orders are there in total?",
+    "status": 200,
+    "seconds": 4.11,
+    "answer": "There are 5,000 orders in total.",
+    "thread_id": "suite2-total",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT COUNT(*) AS total_orders FROM orders;",
+        "result": "total_orders\n5000"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2161,
+      "output_tokens": 276,
+      "total_tokens": 2437
+    }
+  },
+  {
+    "case": 2,
+    "name": "canceled_percentage",
+    "question": "What percentage of orders were canceled?",
+    "status": 200,
+    "seconds": 4.35,
+    "answer": "0.62% of orders were canceled.",
+    "thread_id": "suite2-canceled",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT ROUND(100.0 * SUM(CASE WHEN order_status = 'canceled' THEN 1 ELSE 0 END) / COUNT(*), 2) AS canceled_percentage FROM orders;",
+        "result": "canceled_percentage\n0.62"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2190,
+      "output_tokens": 437,
+      "total_tokens": 2627
+    }
+  },
+  {
+    "case": 3,
+    "name": "top_regions",
+    "question": "Rank regions by total revenue, top 5 only",
+    "status": 200,
+    "seconds": 4.96,
+    "answer": "The top 5 Brazilian states by total revenue are:\n1. Sao Paulo – $279,534.59\n2. Rio de Janeiro – $131,305.79\n3. Minas Gerais – $84,561.04\n4. Parana – $43,279.24\n5. Rio Grande do Sul – $38,593.08.",
+    "thread_id": "suite2-regions",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT customer_state AS region,\n       ROUND(SUM(order_value), 2) AS total_revenue\nFROM orders\nWHERE customer_state != 'not_available'\nGROUP BY customer_state\nORDER BY total_revenue DESC\nLIMIT 5;",
+        "result": "region,total_revenue\nSao Paulo,279534.59\nRio de Janeiro,131305.79\nMinas Gerais,84561.04\nParana,43279.24\nRio Grande do Sul,38593.08"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2251,
+      "output_tokens": 719,
+      "total_tokens": 2970
+    }
+  },
+  {
+    "case": 4,
+    "name": "installments",
+    "question": "Yes or no ? does a higher installment count mean higher order value?",
+    "status": 200,
+    "seconds": 12.78,
+    "answer": "Yes, generally a higher installment count is associated with a higher order value, although the relationship is not perfectly monotonic (there are some lower values at certain installment levels).",
+    "thread_id": "suite2-installments",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT payment_installments,\n       COUNT(*) AS order_count,\n       ROUND(AVG(order_value), 2) AS avg_order_value\nFROM orders\nGROUP BY payment_installments\nORDER BY payment_installments;",
+        "result": "payment_installments,order_count,avg_order_value\n1,2481,121.68\n2,587,132.37\n3,520,143.56\n4,317,152.6\n5,270,149.64\n6,211,206.02\n7,87,179.82\n8,193,326.47\n9,26,210.86\n10,284,373.93\n12,7,259.97\n13,1,135.17\n14,2,144.85\n15,5,269.11\n17,1,172.22\n18,1,236.04\n20,5,612.69\n24,2,854.28"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2362,
+      "output_tokens": 806,
+      "total_tokens": 3168
+    }
+  },
+  {
+    "case": 5,
+    "name": "delivery_stats",
+    "question": "Give me the min, max, and average delivery time",
+    "status": 200,
+    "seconds": 18.27,
+    "answer": "The delivery time ranges from a minimum of 1.02 days to a maximum of 99.66 days, with an average delivery time of 12.44 days.",
+    "thread_id": "suite2-delivery",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT MIN(delivery_days) AS min_delivery_days, MAX(delivery_days) AS max_delivery_days, ROUND(AVG(delivery_days),2) AS avg_delivery_days FROM orders WHERE delivery_days >= 0;",
+        "result": "min_delivery_days,max_delivery_days,avg_delivery_days\n1.02,99.66,12.44"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2222,
+      "output_tokens": 519,
+      "total_tokens": 2741
+    }
+  },
+  {
+    "case": 6,
+    "name": "status_compare",
+    "question": "Compare delivered vs canceled orders ? count and average value for each",
+    "status": 200,
+    "seconds": 21.49,
+    "answer": "- Canceled orders: 31 orders with an average order value of $99.75\n- Delivered orders: 4,845 orders with an average order value of $158.05",
+    "thread_id": "suite2-status",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT order_status AS status,\n       COUNT(*) AS order_count,\n       ROUND(AVG(order_value),2) AS avg_order_value\nFROM orders\nWHERE order_status IN ('delivered','canceled')\nGROUP BY order_status;",
+        "result": "status,order_count,avg_order_value\ncanceled,31,99.75\ndelivered,4845,158.05"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2233,
+      "output_tokens": 572,
+      "total_tokens": 2805
+    }
+  },
+  {
+    "case": 7,
+    "name": "payments",
+    "question": "List every payment method with its order count",
+    "status": 200,
+    "seconds": 20.52,
+    "answer": "Payment Method | Order Count\n--- | ---\ncredit_card | 3710\nboleto | 1050\nvoucher | 150\ndebit_card | 90",
+    "thread_id": "suite2-payments",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT payment_method, COUNT(*) AS order_count FROM orders GROUP BY payment_method ORDER BY order_count DESC;",
+        "result": "payment_method,order_count\ncredit_card,3710\nboleto,1050\nvoucher,150\ndebit_card,90"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2196,
+      "output_tokens": 486,
+      "total_tokens": 2682
+    }
+  },
+  {
+    "case": 8,
+    "name": "correlation",
+    "question": "What's the correlation between review score and delivery days, in plain terms?",
+    "status": 200,
+    "seconds": 22.46,
+    "answer": "The correlation between review score and delivery days is -0.3534, indicating a modest negative relationship: generally, orders that take longer to be delivered tend to receive slightly lower review scores, while faster deliveries are associated with somewhat higher scores.",
+    "thread_id": "suite2-correlation",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT ROUND((AVG(review_score * delivery_days) - AVG(review_score) * AVG(delivery_days)) / (SQRT(AVG(review_score * review_score) - AVG(review_score) * AVG(review_score)) * SQRT(AVG(delivery_days * delivery_days) - AVG(delivery_days) * AVG(delivery_days))),4) AS correlation FROM orders WHERE review_score BETWEEN 1 AND 5 AND delivery_days >= 0;",
+        "result": "correlation\n-0.3534"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2262,
+      "output_tokens": 880,
+      "total_tokens": 3142
+    }
+  },
+  {
+    "case": 9,
+    "name": "health_summary",
+    "question": "Summarize overall order health in 2 sentences",
+    "status": 200,
+    "seconds": 18.62,
+    "answer": "Out of 5,000 orders the platform generated $785,594 in revenue with an average order value of $157.12. Most orders are delivered promptly (average 12.44 days) with a high delivery rate of 96.9%, a low cancellation rate of 0.62%, and customers rate them 4.1 out of 5.",
+    "thread_id": "suite2-health",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT COUNT(*) AS total_orders,\n       ROUND(SUM(order_value),2) AS total_revenue,\n       ROUND(AVG(order_value),2) AS avg_order_value,\n       ROUND(AVG(CASE WHEN delivery_days >= 0 THEN delivery_days END),2) AS avg_delivery_days,\n       ROUND(AVG(CASE WHEN review_score BETWEEN 1 AND 5 THEN review_score END),2) AS avg_review_score,\n       ROUND(100.0 * SUM(CASE WHEN delivery_days >= 0 THEN 1 ELSE 0 END) / COUNT(*),2) AS pct_delivered,\n       ROUND(100.0 * SUM(CASE WHEN order_status = 'canceled' THEN 1 ELSE 0 END) / COUNT(*),2) AS pct_canceled\nFROM orders;",
+        "result": "total_orders,total_revenue,avg_order_value,avg_delivery_days,avg_review_score,pct_delivered,pct_canceled\n5000,785594.01,157.12,12.44,4.1,96.9,0.62"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2368,
+      "output_tokens": 1064,
+      "total_tokens": 3432
+    }
+  },
+  {
+    "case": 10,
+    "name": "monthly_revenue",
+    "question": "revenue by month??",
+    "status": 200,
+    "seconds": 23.73,
+    "answer": "The monthly revenue (order_value) from Oct 2016 to Aug 2018 is:\n- 2016‑10: 3,804.27\n- 2017‑01: 4,235.50\n- 2017‑02: 12,161.06\n- 2017‑03: 21,032.42\n- 2017‑04: 19,858.03\n- 2017‑05: 30,275.58\n- 2017‑06: 25,182.74\n- 2017‑07: 25,241.37\n- 2017‑08: 32,645.57\n- 2017‑09: 52,146.45\n- 2017‑10: 34,466.51\n- 2017‑11: 60,594.40\n- 2017‑12: 37,681.45\n- 2018‑01: 49,735.97\n- 2018‑02: 45,209.61\n- 2018‑03: 57,556.46\n- 2018‑04: 59,169.88\n- 2018‑05: 54,804.16\n- 2018‑06: 59,005.33\n- 2018‑07: 50,458.14\n- 2018‑08: 50,329.11\nThese figures show a clear upward trend, with a peak in November 2017 (≈ 60.6 k) and generally higher revenues in 2018 compared to 2017.",
+    "thread_id": "suite2-monthly-followup",
+    "chart": {
+      "data": [
+        {
+          "mode": "lines+markers",
+          "x": [
+            "2016-10",
+            "2017-01",
+            "2017-02",
+            "2017-03",
+            "2017-04",
+            "2017-05",
+            "2017-06",
+            "2017-07",
+            "2017-08",
+            "2017-09",
+            "2017-10",
+            "2017-11",
+            "2017-12",
+            "2018-01",
+            "2018-02",
+            "2018-03",
+            "2018-04",
+            "2018-05",
+            "2018-06",
+            "2018-07",
+            "2018-08"
+          ],
+          "y": [
+            3804.27,
+            4235.5,
+            12161.06,
+            21032.42,
+            19858.03,
+            30275.58,
+            25182.74,
+            25241.37,
+            32645.57,
+            52146.45,
+            34466.51,
+            60594.4,
+            37681.45,
+            49735.97,
+            45209.61,
+            57556.46,
+            59169.88,
+            54804.16,
+            59005.33,
+            50458.14,
+            50329.11
+          ],
+          "type": "scatter"
+        }
+      ],
+      "layout": {
+        "template": {
+          "data": {
+            "histogram2dcontour": [
+              {
+                "type": "histogram2dcontour",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                },
+                "colorscale": [
+                  [
+                    0.0,
+                    "#0d0887"
+                  ],
+                  [
+                    0.1111111111111111,
+                    "#46039f"
+                  ],
+                  [
+                    0.2222222222222222,
+                    "#7201a8"
+                  ],
+                  [
+                    0.3333333333333333,
+                    "#9c179e"
+                  ],
+                  [
+                    0.4444444444444444,
+                    "#bd3786"
+                  ],
+                  [
+                    0.5555555555555556,
+                    "#d8576b"
+                  ],
+                  [
+                    0.6666666666666666,
+                    "#ed7953"
+                  ],
+                  [
+                    0.7777777777777778,
+                    "#fb9f3a"
+                  ],
+                  [
+                    0.8888888888888888,
+                    "#fdca26"
+                  ],
+                  [
+                    1.0,
+                    "#f0f921"
+                  ]
+                ]
+              }
+            ],
+            "choropleth": [
+              {
+                "type": "choropleth",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                }
+              }
+            ],
+            "histogram2d": [
+              {
+                "type": "histogram2d",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                },
+                "colorscale": [
+                  [
+                    0.0,
+                    "#0d0887"
+                  ],
+                  [
+                    0.1111111111111111,
+                    "#46039f"
+                  ],
+                  [
+                    0.2222222222222222,
+                    "#7201a8"
+                  ],
+                  [
+                    0.3333333333333333,
+                    "#9c179e"
+                  ],
+                  [
+                    0.4444444444444444,
+                    "#bd3786"
+                  ],
+                  [
+                    0.5555555555555556,
+                    "#d8576b"
+                  ],
+                  [
+                    0.6666666666666666,
+                    "#ed7953"
+                  ],
+                  [
+                    0.7777777777777778,
+                    "#fb9f3a"
+                  ],
+                  [
+                    0.8888888888888888,
+                    "#fdca26"
+                  ],
+                  [
+                    1.0,
+                    "#f0f921"
+                  ]
+                ]
+              }
+            ],
+            "heatmap": [
+              {
+                "type": "heatmap",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                },
+                "colorscale": [
+                  [
+                    0.0,
+                    "#0d0887"
+                  ],
+                  [
+                    0.1111111111111111,
+                    "#46039f"
+                  ],
+                  [
+                    0.2222222222222222,
+                    "#7201a8"
+                  ],
+                  [
+                    0.3333333333333333,
+                    "#9c179e"
+                  ],
+                  [
+                    0.4444444444444444,
+                    "#bd3786"
+                  ],
+                  [
+                    0.5555555555555556,
+                    "#d8576b"
+                  ],
+                  [
+                    0.6666666666666666,
+                    "#ed7953"
+                  ],
+                  [
+                    0.7777777777777778,
+                    "#fb9f3a"
+                  ],
+                  [
+                    0.8888888888888888,
+                    "#fdca26"
+                  ],
+                  [
+                    1.0,
+                    "#f0f921"
+                  ]
+                ]
+              }
+            ],
+            "contourcarpet": [
+              {
+                "type": "contourcarpet",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                }
+              }
+            ],
+            "contour": [
+              {
+                "type": "contour",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                },
+                "colorscale": [
+                  [
+                    0.0,
+                    "#0d0887"
+                  ],
+                  [
+                    0.1111111111111111,
+                    "#46039f"
+                  ],
+                  [
+                    0.2222222222222222,
+                    "#7201a8"
+                  ],
+                  [
+                    0.3333333333333333,
+                    "#9c179e"
+                  ],
+                  [
+                    0.4444444444444444,
+                    "#bd3786"
+                  ],
+                  [
+                    0.5555555555555556,
+                    "#d8576b"
+                  ],
+                  [
+                    0.6666666666666666,
+                    "#ed7953"
+                  ],
+                  [
+                    0.7777777777777778,
+                    "#fb9f3a"
+                  ],
+                  [
+                    0.8888888888888888,
+                    "#fdca26"
+                  ],
+                  [
+                    1.0,
+                    "#f0f921"
+                  ]
+                ]
+              }
+            ],
+            "surface": [
+              {
+                "type": "surface",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                },
+                "colorscale": [
+                  [
+                    0.0,
+                    "#0d0887"
+                  ],
+                  [
+                    0.1111111111111111,
+                    "#46039f"
+                  ],
+                  [
+                    0.2222222222222222,
+                    "#7201a8"
+                  ],
+                  [
+                    0.3333333333333333,
+                    "#9c179e"
+                  ],
+                  [
+                    0.4444444444444444,
+                    "#bd3786"
+                  ],
+                  [
+                    0.5555555555555556,
+                    "#d8576b"
+                  ],
+                  [
+                    0.6666666666666666,
+                    "#ed7953"
+                  ],
+                  [
+                    0.7777777777777778,
+                    "#fb9f3a"
+                  ],
+                  [
+                    0.8888888888888888,
+                    "#fdca26"
+                  ],
+                  [
+                    1.0,
+                    "#f0f921"
+                  ]
+                ]
+              }
+            ],
+            "mesh3d": [
+              {
+                "type": "mesh3d",
+                "colorbar": {
+                  "outlinewidth": 0,
+                  "ticks": ""
+                }
+              }
+            ],
+            "scatter": [
+              {
+                "fillpattern": {
+                  "fillmode": "overlay",
+                  "size": 10,
+                  "solidity": 0.2
+                },
+                "type": "scatter"
+              }
+            ],
+            "parcoords": [
+              {
+                "type": "parcoords",
+                "line": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scatterpolargl": [
+              {
+                "type": "scatterpolargl",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "bar": [
+              {
+                "error_x": {
+                  "color": "#2a3f5f"
+                },
+                "error_y": {
+                  "color": "#2a3f5f"
+                },
+                "marker": {
+                  "line": {
+                    "color": "#E5ECF6",
+                    "width": 0.5
+                  },
+                  "pattern": {
+                    "fillmode": "overlay",
+                    "size": 10,
+                    "solidity": 0.2
+                  }
+                },
+                "type": "bar"
+              }
+            ],
+            "scattergeo": [
+              {
+                "type": "scattergeo",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scatterpolar": [
+              {
+                "type": "scatterpolar",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "histogram": [
+              {
+                "marker": {
+                  "pattern": {
+                    "fillmode": "overlay",
+                    "size": 10,
+                    "solidity": 0.2
+                  }
+                },
+                "type": "histogram"
+              }
+            ],
+            "scattergl": [
+              {
+                "type": "scattergl",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scatter3d": [
+              {
+                "type": "scatter3d",
+                "line": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                },
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scattermap": [
+              {
+                "type": "scattermap",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scatterternary": [
+              {
+                "type": "scatterternary",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "scattercarpet": [
+              {
+                "type": "scattercarpet",
+                "marker": {
+                  "colorbar": {
+                    "outlinewidth": 0,
+                    "ticks": ""
+                  }
+                }
+              }
+            ],
+            "carpet": [
+              {
+                "aaxis": {
+                  "endlinecolor": "#2a3f5f",
+                  "gridcolor": "white",
+                  "linecolor": "white",
+                  "minorgridcolor": "white",
+                  "startlinecolor": "#2a3f5f"
+                },
+                "baxis": {
+                  "endlinecolor": "#2a3f5f",
+                  "gridcolor": "white",
+                  "linecolor": "white",
+                  "minorgridcolor": "white",
+                  "startlinecolor": "#2a3f5f"
+                },
+                "type": "carpet"
+              }
+            ],
+            "table": [
+              {
+                "cells": {
+                  "fill": {
+                    "color": "#EBF0F8"
+                  },
+                  "line": {
+                    "color": "white"
+                  }
+                },
+                "header": {
+                  "fill": {
+                    "color": "#C8D4E3"
+                  },
+                  "line": {
+                    "color": "white"
+                  }
+                },
+                "type": "table"
+              }
+            ],
+            "barpolar": [
+              {
+                "marker": {
+                  "line": {
+                    "color": "#E5ECF6",
+                    "width": 0.5
+                  },
+                  "pattern": {
+                    "fillmode": "overlay",
+                    "size": 10,
+                    "solidity": 0.2
+                  }
+                },
+                "type": "barpolar"
+              }
+            ],
+            "pie": [
+              {
+                "automargin": true,
+                "type": "pie"
+              }
+            ]
+          },
+          "layout": {
+            "autotypenumbers": "strict",
+            "colorway": [
+              "#636efa",
+              "#EF553B",
+              "#00cc96",
+              "#ab63fa",
+              "#FFA15A",
+              "#19d3f3",
+              "#FF6692",
+              "#B6E880",
+              "#FF97FF",
+              "#FECB52"
+            ],
+            "font": {
+              "color": "#2a3f5f"
+            },
+            "hovermode": "closest",
+            "hoverlabel": {
+              "align": "left"
+            },
+            "paper_bgcolor": "white",
+            "plot_bgcolor": "#E5ECF6",
+            "polar": {
+              "bgcolor": "#E5ECF6",
+              "angularaxis": {
+                "gridcolor": "white",
+                "linecolor": "white",
+                "ticks": ""
+              },
+              "radialaxis": {
+                "gridcolor": "white",
+                "linecolor": "white",
+                "ticks": ""
+              }
+            },
+            "ternary": {
+              "bgcolor": "#E5ECF6",
+              "aaxis": {
+                "gridcolor": "white",
+                "linecolor": "white",
+                "ticks": ""
+              },
+              "baxis": {
+                "gridcolor": "white",
+                "linecolor": "white",
+                "ticks": ""
+              },
+              "caxis": {
+                "gridcolor": "white",
+                "linecolor": "white",
+                "ticks": ""
+              }
+            },
+            "coloraxis": {
+              "colorbar": {
+                "outlinewidth": 0,
+                "ticks": ""
+              }
+            },
+            "colorscale": {
+              "sequential": [
+                [
+                  0.0,
+                  "#0d0887"
+                ],
+                [
+                  0.1111111111111111,
+                  "#46039f"
+                ],
+                [
+                  0.2222222222222222,
+                  "#7201a8"
+                ],
+                [
+                  0.3333333333333333,
+                  "#9c179e"
+                ],
+                [
+                  0.4444444444444444,
+                  "#bd3786"
+                ],
+                [
+                  0.5555555555555556,
+                  "#d8576b"
+                ],
+                [
+                  0.6666666666666666,
+                  "#ed7953"
+                ],
+                [
+                  0.7777777777777778,
+                  "#fb9f3a"
+                ],
+                [
+                  0.8888888888888888,
+                  "#fdca26"
+                ],
+                [
+                  1.0,
+                  "#f0f921"
+                ]
+              ],
+              "sequentialminus": [
+                [
+                  0.0,
+                  "#0d0887"
+                ],
+                [
+                  0.1111111111111111,
+                  "#46039f"
+                ],
+                [
+                  0.2222222222222222,
+                  "#7201a8"
+                ],
+                [
+                  0.3333333333333333,
+                  "#9c179e"
+                ],
+                [
+                  0.4444444444444444,
+                  "#bd3786"
+                ],
+                [
+                  0.5555555555555556,
+                  "#d8576b"
+                ],
+                [
+                  0.6666666666666666,
+                  "#ed7953"
+                ],
+                [
+                  0.7777777777777778,
+                  "#fb9f3a"
+                ],
+                [
+                  0.8888888888888888,
+                  "#fdca26"
+                ],
+                [
+                  1.0,
+                  "#f0f921"
+                ]
+              ],
+              "diverging": [
+                [
+                  0,
+                  "#8e0152"
+                ],
+                [
+                  0.1,
+                  "#c51b7d"
+                ],
+                [
+                  0.2,
+                  "#de77ae"
+                ],
+                [
+                  0.3,
+                  "#f1b6da"
+                ],
+                [
+                  0.4,
+                  "#fde0ef"
+                ],
+                [
+                  0.5,
+                  "#f7f7f7"
+                ],
+                [
+                  0.6,
+                  "#e6f5d0"
+                ],
+                [
+                  0.7,
+                  "#b8e186"
+                ],
+                [
+                  0.8,
+                  "#7fbc41"
+                ],
+                [
+                  0.9,
+                  "#4d9221"
+                ],
+                [
+                  1,
+                  "#276419"
+                ]
+              ]
+            },
+            "xaxis": {
+              "gridcolor": "white",
+              "linecolor": "white",
+              "ticks": "",
+              "title": {
+                "standoff": 15
+              },
+              "zerolinecolor": "white",
+              "automargin": true,
+              "zerolinewidth": 2
+            },
+            "yaxis": {
+              "gridcolor": "white",
+              "linecolor": "white",
+              "ticks": "",
+              "title": {
+                "standoff": 15
+              },
+              "zerolinecolor": "white",
+              "automargin": true,
+              "zerolinewidth": 2
+            },
+            "scene": {
+              "xaxis": {
+                "backgroundcolor": "#E5ECF6",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "showbackground": true,
+                "ticks": "",
+                "zerolinecolor": "white",
+                "gridwidth": 2
+              },
+              "yaxis": {
+                "backgroundcolor": "#E5ECF6",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "showbackground": true,
+                "ticks": "",
+                "zerolinecolor": "white",
+                "gridwidth": 2
+              },
+              "zaxis": {
+                "backgroundcolor": "#E5ECF6",
+                "gridcolor": "white",
+                "linecolor": "white",
+                "showbackground": true,
+                "ticks": "",
+                "zerolinecolor": "white",
+                "gridwidth": 2
+              }
+            },
+            "shapedefaults": {
+              "line": {
+                "color": "#2a3f5f"
+              }
+            },
+            "annotationdefaults": {
+              "arrowcolor": "#2a3f5f",
+              "arrowhead": 0,
+              "arrowwidth": 1
+            },
+            "geo": {
+              "bgcolor": "white",
+              "landcolor": "#E5ECF6",
+              "subunitcolor": "white",
+              "showland": true,
+              "showlakes": true,
+              "lakecolor": "white"
+            },
+            "title": {
+              "x": 0.05
+            }
+          }
+        },
+        "title": {
+          "text": "Monthly Revenue (order_value)"
+        },
+        "xaxis": {
+          "title": {
+            "text": "month"
+          }
+        },
+        "yaxis": {
+          "title": {
+            "text": "revenue"
+          }
+        }
+      }
+    },
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT strftime('%Y-%m', order_date) AS month,\n       ROUND(SUM(order_value), 2) AS revenue\nFROM orders\nGROUP BY month\nORDER BY month;",
+        "result": "month,revenue\n2016-10,3804.27\n2017-01,4235.5\n2017-02,12161.06\n2017-03,21032.42\n2017-04,19858.03\n2017-05,30275.58\n2017-06,25182.74\n2017-07,25241.37\n2017-08,32645.57\n2017-09,52146.45\n2017-10,34466.51\n2017-11,60594.4\n2017-12,37681.45\n2018-01,49735.97\n2018-02,45209.61\n2018-03,57556.46\n2018-04,59169.88\n2018-05,54804.16\n2018-06,59005.33\n2018-07,50458.14\n2018-08,50329.11"
+      }
+    ],
+    "usage": {
+      "input_tokens": 2388,
+      "output_tokens": 1035,
+      "total_tokens": 3423
+    }
+  },
+  {
+    "case": 11,
+    "name": "last_quarter_followup",
+    "question": "what about last quarter only",
+    "status": 200,
+    "seconds": 29.13,
+    "answer": "The revenue for the last quarter is 100,787.25.",
+    "thread_id": "suite2-monthly-followup",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "WITH max_info AS (SELECT MAX(order_date) AS max_date, ((CAST(strftime('%m', MAX(order_date)) AS INTEGER)-1) % 3) AS offset_months FROM orders), quarter_range AS (SELECT date(max_date, 'start of month', '-' || offset_months || ' months') AS quarter_start, date(date(max_date, 'start of month', '-' || offset_months || ' months'), '+3 months', '-1 day') AS quarter_end FROM max_info) SELECT ROUND(SUM(order_value), 2) AS revenue_last_quarter FROM orders, quarter_range WHERE order_date BETWEEN quarter_start AND quarter_end;",
+        "result": "revenue_last_quarter\n100787.25"
+      }
+    ],
+    "usage": {
+      "input_tokens": 3101,
+      "output_tokens": 1163,
+      "total_tokens": 4264
+    }
+  },
+  {
+    "case": 12,
+    "name": "missing_order",
+    "question": "Show me literally everything about order ORD-12345",
+    "status": 200,
+    "seconds": 21.13,
+    "answer": "The query for order ID 'ORD-12345' returned no rows, meaning there is no record for this order in the dataset.",
+    "thread_id": "suite2-missing",
+    "chart": null,
+    "evidence": [
+      {
+        "kind": "sql",
+        "sql": "SELECT order_id, order_date, order_status, customer_id, customer_city, customer_state, product_category, seller_id, seller_state, quantity, distinct_products, item_value, freight_value, order_value, payment_method, payment_installments, payment_value, review_score, estimated_delivery_date, delivered_date, delivery_days FROM orders WHERE order_id = 'ORD-12345' LIMIT 50;",
+        "result": "Query ran successfully but returned no rows."
+      }
+    ],
+    "usage": {
+      "input_tokens": 2241,
+      "output_tokens": 657,
+      "total_tokens": 2898
+    }
+  }
+]

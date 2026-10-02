@@ -8,6 +8,7 @@ from backend.agent.state import (
     LlmCall,
     QueryState,
 )
+from backend.agent.telemetry import reset_usage
 
 
 def ask(
@@ -18,6 +19,7 @@ def ask(
     if not question or not question.strip():
         return {"question": question, "final_answer": "Question cannot be empty."}
 
+    reset_usage()
     graph = query_graph
     if llm_call:
         graph = build_query_graph(

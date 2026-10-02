@@ -21,6 +21,12 @@ class StatisticsTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertGreater(result["value"], 0.99)
 
+    def test_linear_regression_returns_slope_and_intercept(self) -> None:
+        result = calculate_statistics(CSV_DATA, "linear_regression", "orders", "revenue")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["value"], {"slope": 5.0, "intercept": 0.0})
+        self.assertEqual(result["count"], 3)
+
     def test_rejects_nonnumeric_data(self) -> None:
         result = calculate_statistics("name,value\nA,nope\n", "mean", "value")
         self.assertFalse(result["ok"])

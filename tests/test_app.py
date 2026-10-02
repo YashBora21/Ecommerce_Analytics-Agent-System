@@ -1,4 +1,4 @@
-import json
+﻿import json
 import unittest
 
 from fastapi.testclient import TestClient
@@ -16,6 +16,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "database": "ok"})
 
+    def test_serves_frontend(self) -> None:
+        response = TestClient(app).get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<title>Ecommerce Analytics</title>", response.text)
     def test_allows_frontend_origin(self) -> None:
         response = TestClient(app).options(
             "/api/query",
@@ -93,3 +98,4 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

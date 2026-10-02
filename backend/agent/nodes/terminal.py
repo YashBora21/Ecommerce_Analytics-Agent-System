@@ -17,9 +17,10 @@ def make_partial_answer(remember):
             reason = f" Reason: {state['error']}" if state.get("error") else ""
             answer = f"{prefix}{reason} Here is the evidence collected so far:\n{evidence}"
         else:
+            reason = state.get("error", "Unknown query failure")
             answer = (
-                "I could not build a valid query within the allowed attempts. "
-                "Please rephrase the question."
+                "I could not run a valid query within the allowed attempts. "
+                f"Reason: {reason} Please rephrase the question."
             )
         return remember(state, answer)
 
