@@ -1,9 +1,5 @@
-from backend.agent.memory import format_evidence
+﻿from backend.agent.memory import format_evidence
 from backend.agent.state import MAX_CHART_TRIES, QueryState
-
-
-def make_failure(remember):
-    return lambda state: remember(state, state["error"])
 
 
 def make_partial_answer(remember):
@@ -25,3 +21,4 @@ def make_partial_answer(remember):
         return remember(state, answer)
 
     return partial_answer
+

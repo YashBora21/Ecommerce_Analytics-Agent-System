@@ -1,8 +1,7 @@
-﻿import json
+﻿from groq import GroqError
+from pydantic import ValidationError
 
-from groq import GroqError
-
-from backend.agent.decision import chart_required, parse_action
+from backend.agent.decision import parse_action_json
 from backend.agent.memory import format_evidence
 from backend.agent.prompt import RESULT_ASSESSMENT_PROMPT
 from backend.agent.state import LlmCall, QueryState
@@ -10,8 +9,6 @@ from backend.agent.telemetry import logger
 
 
 MAX_ASSESSMENT_ATTEMPTS = 2
-
-
 def make_assess_result(llm_call: LlmCall, remember):
     def assess_result(state: QueryState) -> QueryState:
         steps = state.get("steps", 0) + 1
@@ -30,12 +27,8 @@ def make_assess_result(llm_call: LlmCall, remember):
             for attempt in range(1, MAX_ASSESSMENT_ATTEMPTS + 1):
                 response = llm_call(messages)
                 try:
-                    action = parse_action(json.loads(response))
+                    action = parse_action_json(response)
                     if action["name"] == "answer":
-                        if chart_required(state):
-                            raise ValueError(
-                                "the evidence would be clearer as a chart; choose create_chart"
-                            )
                         return {
                             **remember(state, action["args"]["final_answer"]),
                             "action": action,
@@ -43,7 +36,7 @@ def make_assess_result(llm_call: LlmCall, remember):
                             "error": "",
                         }
                     return {"action": action, "steps": steps, "error": ""}
-                except (json.JSONDecodeError, TypeError, ValueError) as error:
+                except (ValidationError, ValueError) as error:
                     logger.warning(
                         "event=assessment_retry attempt=%s error=%s response=%s",
                         attempt,
@@ -71,3 +64,6 @@ def make_assess_result(llm_call: LlmCall, remember):
             return {"steps": steps, "error": f"Could not assess query results: {error}"}
 
     return assess_result
+
+
+

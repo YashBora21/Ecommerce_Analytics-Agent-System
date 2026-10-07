@@ -5,21 +5,10 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from backend.agent.agent import MAX_AGENT_STEPS, MAX_SQL_TRIES, ask, build_query_graph
 from backend.agent.prompt import (
-    GUARDRAIL_SYSTEM_PROMPT,
     MEMORY_SUMMARY_PROMPT,
     RESULT_ASSESSMENT_PROMPT,
     SQL_SYSTEM_PROMPT,
 )
-
-
-def guardrail_json(in_scope=True) -> str:
-    return json.dumps(
-        {
-            "is_in_scope": in_scope,
-            "is_greeting": False,
-            "reason": "Ecommerce question" if in_scope else "General knowledge",
-        }
-    )
 
 
 def assessment_json(action, answer="", goal="") -> str:
@@ -37,8 +26,6 @@ class QueryGraphTests(unittest.TestCase):
     def test_question_reaches_grounded_answer(self) -> None:
         def fake_llm(messages):
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT COUNT(*) AS n FROM orders", "reason": "count"})
             self.assertEqual(system, RESULT_ASSESSMENT_PROMPT)
@@ -53,6 +40,24 @@ class QueryGraphTests(unittest.TestCase):
         self.assertEqual(result["steps"], 2)
         self.assertEqual(len(result["evidence"]), 1)
 
+    def test_unrelated_question_stops_before_sql(self) -> None:
+        def fake_llm(messages):
+            self.assertEqual(messages[0]["content"], SQL_SYSTEM_PROMPT)
+            return json.dumps({
+                "action": "answer",
+                "sql": "",
+                "reason": "unrelated",
+                "final_answer": "I can only answer questions about the Olist ecommerce dataset.",
+            })
+
+        result = build_query_graph(
+            fake_llm,
+            lambda query: self.fail("SQL should not run"),
+        ).invoke({"question": "Hi, tell me about Python"})
+
+        self.assertIn("Olist ecommerce dataset", result["final_answer"])
+        self.assertEqual(result["steps"], 1)
+        self.assertEqual(result["evidence"], [])
     def test_agent_can_request_second_sql_query(self) -> None:
         planner_calls = 0
         assessment_calls = 0
@@ -60,8 +65,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal planner_calls, assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 planner_calls += 1
                 if planner_calls == 1:
@@ -93,8 +96,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT delivery_days FROM orders WHERE delivery_days >= 0", "reason": "raw values"})
             assessment_calls += 1
@@ -129,14 +130,31 @@ class QueryGraphTests(unittest.TestCase):
         self.assertEqual(len(result["evidence"]), 2)
         self.assertEqual(result["steps"], 3)
 
+    def test_agent_may_answer_multirow_result_without_chart(self) -> None:
+        def fake_llm(messages):
+            if messages[0]["content"] == SQL_SYSTEM_PROMPT:
+                return json.dumps({
+                    "sql": "SELECT category, total_sales FROM category_sales",
+                    "reason": "rank categories",
+                })
+            return assessment_json(
+                "answer",
+                "The leading categories are health and beauty, watches, and bed and bath.",
+            )
+
+        result = build_query_graph(
+            fake_llm,
+            lambda query: "category,total_sales\nhealth_beauty,1258681.34\nwatches_gifts,1205005.68\nbed_bath_table,1036988.68",
+        ).invoke({"question": "Which categories have the highest sales?"})
+
+        self.assertFalse(result.get("chart"))
+        self.assertIn("leading categories", result["final_answer"])
     def test_agent_can_create_chart_from_sql_rows(self) -> None:
         assessment_calls = 0
 
         def fake_llm(messages):
             nonlocal assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps(
                     {
@@ -182,8 +200,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal planner_calls, assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 planner_calls += 1
                 if planner_calls == 1:
@@ -228,8 +244,6 @@ class QueryGraphTests(unittest.TestCase):
 
         def fake_llm(messages):
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT customer_state, SUM(order_value) AS revenue FROM orders GROUP BY customer_state", "reason": "chart data"})
             return json.dumps(
@@ -269,8 +283,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT '2017-11' AS month, 60594.4 AS total_sales", "reason": "top month"})
             assessment_calls += 1
@@ -294,8 +306,6 @@ class QueryGraphTests(unittest.TestCase):
     def test_invalid_next_action_is_rejected(self) -> None:
         def fake_llm(messages):
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT COUNT(*) AS n FROM orders", "reason": "count"})
             return json.dumps({"action": "delete_data", "reason": "bad", "arguments": {}})
@@ -314,8 +324,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal planner_calls, assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 planner_calls += 1
                 sql = "SELECT order_date, SUM(order_value) AS revenue FROM orders GROUP BY order_date"
@@ -347,8 +355,6 @@ class QueryGraphTests(unittest.TestCase):
         def fake_llm(messages):
             nonlocal planner_calls, assessment_calls
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 planner_calls += 1
                 sql = {
@@ -377,8 +383,6 @@ class QueryGraphTests(unittest.TestCase):
     def test_step_cap_returns_collected_evidence(self) -> None:
         def fake_llm(messages):
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
                 return json.dumps({"sql": "SELECT COUNT(*) AS orders FROM orders", "reason": "count"})
             return assessment_json("query_sql", goal="Get another metric")
@@ -395,8 +399,6 @@ class QueryGraphTests(unittest.TestCase):
 
         def fake_llm(messages):
             nonlocal planner_calls
-            if messages[0]["content"] == GUARDRAIL_SYSTEM_PROMPT:
-                return guardrail_json()
             planner_calls += 1
             return json.dumps({"sql": "DELETE FROM orders", "reason": "invalid"})
 
@@ -408,39 +410,15 @@ class QueryGraphTests(unittest.TestCase):
         self.assertEqual(planner_calls, MAX_SQL_TRIES)
         self.assertIn("rephrase", result["final_answer"])
 
-    def test_invalid_guardrail_fails_closed(self) -> None:
-        result = build_query_graph(
-            lambda messages: json.dumps(
-                {"is_in_scope": "false", "is_greeting": False, "reason": "bad"}
-            ),
-            lambda query: self.fail("SQL should not run"),
-        ).invoke({"question": "Weather?"})
-
-        self.assertIn("Could not classify question", result["final_answer"])
-
-    def test_greeting_and_out_of_scope_skip_sql(self) -> None:
-        greeting = build_query_graph(
-            lambda messages: self.fail("LLM should not run for greeting"),
-            lambda query: self.fail("SQL should not run"),
-        ).invoke({"question": "Hello!"})
-        self.assertIn("Olist ecommerce dataset", greeting["final_answer"])
-
-        outside = build_query_graph(
-            lambda messages: guardrail_json(False),
-            lambda query: self.fail("SQL should not run"),
-        ).invoke({"question": "What is the capital of France?"})
-        self.assertIn("outside this ecommerce dataset", outside["final_answer"])
 
 
 class ThreadMemoryTests(unittest.TestCase):
-    def make_llm(self, guardrail_inputs=None, summary_counter=None):
+    def make_llm(self, sql_inputs=None, summary_counter=None):
         def fake_llm(messages):
             system = messages[0]["content"]
-            if system == GUARDRAIL_SYSTEM_PROMPT:
-                if guardrail_inputs is not None:
-                    guardrail_inputs.append(messages[1]["content"])
-                return guardrail_json()
             if system == SQL_SYSTEM_PROMPT:
+                if sql_inputs is not None:
+                    sql_inputs.append("\n".join(message["content"] for message in messages))
                 return json.dumps({"sql": "SELECT COUNT(*) AS n FROM orders", "reason": "count"})
             if system == MEMORY_SUMMARY_PROMPT:
                 if summary_counter is not None:
@@ -453,7 +431,7 @@ class ThreadMemoryTests(unittest.TestCase):
     def test_follow_up_gets_recent_history_and_last_sql(self) -> None:
         inputs = []
         graph = build_query_graph(
-            self.make_llm(guardrail_inputs=inputs),
+            self.make_llm(sql_inputs=inputs),
             lambda query: "n\n5000",
             MemorySaver(),
         )
@@ -489,6 +467,17 @@ class ThreadMemoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+
+
+
+
+
+
+
+
 
 
 

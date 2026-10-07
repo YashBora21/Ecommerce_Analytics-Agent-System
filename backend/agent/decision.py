@@ -1,136 +1,105 @@
-﻿from backend.tools.chart import SUPPORTED_CHARTS
+﻿from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+
+from backend.tools.chart import SUPPORTED_CHARTS
 from backend.tools.statistics import SUPPORTED_OPERATIONS
 
-import csv
-import io
 
-ACTIONS = {"answer", "query_sql", "calculate_statistics", "create_chart"}
-
-
-def chart_required(state: dict) -> bool:
-    """Enforce charts from evidence shape, not special-case questions."""
-    if state.get("chart"):
-        return False
-    question = state.get("question", "").lower()
-    if "no chart" in question or "text only" in question:
-        return False
-
-    evidence = state.get("evidence", [])
-    operations = ('"operation":"correlation"', '"operation":"linear_regression"')
-    if any(
-        item.get("kind") == "statistics"
-        and any(operation in item.get("result", "") for operation in operations)
-        for item in evidence
-    ):
-        return True
-
-    sql_results = [
-        item["result"] for item in evidence if item.get("kind", "sql") == "sql"
-    ]
-    if not sql_results:
-        return False
-    rows = list(csv.DictReader(io.StringIO(sql_results[-1])))
-    if len(rows) < 3 or not 2 <= len(rows[0]) <= 3:
-        return False
-
-    numeric_columns = 0
-    for column in rows[0]:
-        try:
-            [float(row[column]) for row in rows if row[column] != ""]
-            numeric_columns += 1
-        except (TypeError, ValueError):
-            pass
-    return 0 < numeric_columns < len(rows[0])
+Text = Annotated[str, StringConstraints(strip_whitespace=True)]
+RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-def _text(args, key, required=True):
-    value = args.get(key, "")
-    if not isinstance(value, str):
-        raise ValueError(f"{key} must be text")
-    value = value.strip()
-    if required and not value:
-        raise ValueError(f"{key.replace('_', ' ')} is empty")
-    return value
+class AnswerArgs(BaseModel):
+    final_answer: RequiredText
 
 
-def _check_answer(args):
-    return {"final_answer": _text(args, "final_answer")}
+class QueryArgs(BaseModel):
+    next_query_goal: RequiredText
 
 
-def _check_query(args):
-    return {"next_query_goal": _text(args, "next_query_goal")}
+class StatisticsArgs(BaseModel):
+    operation: RequiredText
+    column: RequiredText
+    second_column: Text = ""
+    percentile: float | None = None
+
+    @field_validator("operation")
+    @classmethod
+    def supported_operation(cls, operation: str) -> str:
+        if operation not in SUPPORTED_OPERATIONS:
+            raise ValueError(f"unsupported statistics operation: {operation}")
+        return operation
+
+    @model_validator(mode="after")
+    def required_arguments(self):
+        if self.operation in {"correlation", "linear_regression"} and not self.second_column:
+            raise ValueError(f"{self.operation} requires second_column")
+        if self.operation == "percentile" and self.percentile is None:
+            raise ValueError("percentile requires a number")
+        return self
 
 
-def _check_statistics(args):
-    operation = _text(args, "operation")
-    if operation not in SUPPORTED_OPERATIONS:
-        raise ValueError(f"unsupported statistics operation: {operation}")
-    column = _text(args, "column")
-    second_column = _text(args, "second_column", False)
-    percentile = args.get("percentile")
-    if operation in {"correlation", "linear_regression"} and not second_column:
-        raise ValueError(f"{operation} requires second_column")
-    if operation == "percentile" and not isinstance(percentile, (int, float)):
-        raise ValueError("percentile requires a number")
-    return {
-        "operation": operation,
-        "column": column,
-        "second_column": second_column,
-        "percentile": percentile,
-    }
+class ChartArgs(BaseModel):
+    chart_type: RequiredText
+    x_column: Text = ""
+    y_column: Text = ""
+    value_column: Text = ""
+    path_columns: list[RequiredText] = Field(default_factory=list)
+    title: Text = ""
+    final_answer: RequiredText
+
+    @field_validator("chart_type")
+    @classmethod
+    def supported_chart(cls, chart_type: str) -> str:
+        if chart_type not in SUPPORTED_CHARTS:
+            raise ValueError(f"unsupported chart type: {chart_type}")
+        return chart_type
+
+    @model_validator(mode="after")
+    def required_columns(self):
+        if self.chart_type == "heatmap" and not all(
+            (self.x_column, self.y_column, self.value_column)
+        ):
+            raise ValueError("heatmap requires x, y, and value columns")
+        if self.chart_type == "treemap" and (
+            not self.path_columns or not self.value_column
+        ):
+            raise ValueError("treemap requires path and value columns")
+        if self.chart_type not in {"heatmap", "treemap"} and not all(
+            (self.x_column, self.y_column)
+        ):
+            raise ValueError("chart requires x and y columns")
+        return self
 
 
-def _check_chart(args):
-    chart_type = _text(args, "chart_type")
-    if chart_type not in SUPPORTED_CHARTS:
-        raise ValueError(f"unsupported chart type: {chart_type}")
-    x_column = _text(args, "x_column", False)
-    y_column = _text(args, "y_column", False)
-    value_column = _text(args, "value_column", False)
-    title = _text(args, "title", False)
-    final_answer = _text(args, "final_answer")
-    path_columns = args.get("path_columns", [])
-    if not isinstance(path_columns, list) or not all(
-        isinstance(column, str) and column.strip() for column in path_columns
-    ):
-        raise ValueError("path_columns must be a list of column names")
-    if chart_type == "heatmap" and not all((x_column, y_column, value_column)):
-        raise ValueError("heatmap requires x, y, and value columns")
-    if chart_type == "treemap" and (not path_columns or not value_column):
-        raise ValueError("treemap requires path and value columns")
-    if chart_type not in {"heatmap", "treemap"} and not all((x_column, y_column)):
-        raise ValueError("chart requires x and y columns")
-    return {
-        "chart_type": chart_type,
-        "x_column": x_column,
-        "y_column": y_column,
-        "value_column": value_column,
-        "path_columns": [column.strip() for column in path_columns],
-        "title": title,
-        "final_answer": final_answer,
-    }
-
-
-_VALIDATORS = {
-    "answer": _check_answer,
-    "query_sql": _check_query,
-    "calculate_statistics": _check_statistics,
-    "create_chart": _check_chart,
+ACTION_ARGUMENTS = {
+    "answer": AnswerArgs,
+    "query_sql": QueryArgs,
+    "calculate_statistics": StatisticsArgs,
+    "create_chart": ChartArgs,
 }
 
 
-def parse_action(decision: dict) -> dict:
-    if not isinstance(decision, dict):
-        raise ValueError("decision must be an object")
-    name = decision.get("action")
-    if name not in ACTIONS:
-        raise ValueError("invalid next action")
-    if not isinstance(decision.get("reason"), str):
-        raise ValueError("action reason must be text")
-    args = decision.get("arguments")
-    if not isinstance(args, dict):
-        raise ValueError("arguments must be an object")
-    return {"name": name, "args": _VALIDATORS[name](args)}
+class Decision(BaseModel):
+    action: RequiredText
+    reason: Text
+    arguments: dict
 
+    @field_validator("action")
+    @classmethod
+    def supported_action(cls, action: str) -> str:
+        if action not in ACTION_ARGUMENTS:
+            raise ValueError("invalid next action")
+        return action
+
+
+
+
+
+def parse_action_json(value: str) -> dict:
+    decision = Decision.model_validate_json(value)
+    arguments = ACTION_ARGUMENTS[decision.action].model_validate(decision.arguments)
+    return {"name": decision.action, "args": arguments.model_dump()}
 
 

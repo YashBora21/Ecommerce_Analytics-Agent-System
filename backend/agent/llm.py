@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from groq import Groq, GroqError
 
 from backend.agent.prompt import (
-    GUARDRAIL_SYSTEM_PROMPT,
     RESULT_ASSESSMENT_PROMPT,
     SQL_SYSTEM_PROMPT,
 )
@@ -23,8 +22,7 @@ def call_groq(messages: list[Message]) -> str:
 
     options = {}
     if messages[0]["content"] in {
-        GUARDRAIL_SYSTEM_PROMPT,
-        RESULT_ASSESSMENT_PROMPT,
+            RESULT_ASSESSMENT_PROMPT,
         SQL_SYSTEM_PROMPT,
     }:
         options["response_format"] = {"type": "json_object"}
@@ -53,3 +51,4 @@ def call_groq(messages: list[Message]) -> str:
         output_tokens,
     )
     return response.choices[0].message.content or ""
+

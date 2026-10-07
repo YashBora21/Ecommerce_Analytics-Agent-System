@@ -1,11 +1,12 @@
 ﻿import json
 import uuid
+from typing import Annotated
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from backend.agent import ask
 from backend.agent.state import QueryState
@@ -16,14 +17,17 @@ from backend.tools.sql_core import execute_sql
 app = FastAPI(title="Ecommerce Analytics Agent")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5500", "http://localhost:5500"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
+Question = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class QueryRequest(BaseModel):
-    question: str = Field(min_length=1)
+    question: Question
     thread_id: str | None = None
 
 
@@ -55,10 +59,7 @@ def health() -> dict[str, str]:
 
 @app.post("/api/query", response_model=QueryResponse)
 def query(request: QueryRequest, agent=Depends(get_agent)) -> QueryResponse:
-    question = request.question.strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="Question cannot be empty")
-
+    question = request.question
     thread_id = request.thread_id or str(uuid.uuid4())
     reset_usage()
     logger.info("event=request_start thread_id=%s question=%s", thread_id, question[:160])

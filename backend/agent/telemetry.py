@@ -47,19 +47,29 @@ def logged_node(name, node):
             raise
 
         action = update["action"] if "action" in update else state.get("action", {})
-        route = update["route"] if "route" in update else state.get("route", "")
-        sql = update["sql"] if "sql" in update else state.get("sql", "")
         error = update["error"] if "error" in update else state.get("error", "")
-        logger.info(
-            "node=%s event=end step=%s route=%s action=%s sql=%s error=%s tokens=%s",
-            name,
-            update.get("steps", state.get("steps", 0)),
-            route,
-            action.get("name", ""),
-            sql,
-            error,
-            get_usage(),
-        )
+        details = {
+            "node": name,
+            "step": update.get("steps", state.get("steps", 0)),
+            "action": action.get("name", ""),
+            "error": error,
+            "tokens": get_usage(),
+        }
+        if name in {"generate_sql", "execute"}:
+            sql = update.get("sql", state.get("sql", ""))
+            details["sql"] = " ".join(sql.split())
+            logger.info(
+                "node=%(node)s event=end step=%(step)s action=%(action)s "
+                "sql=%(sql)s error=%(error)s tokens=%(tokens)s",
+                details,
+            )
+        else:
+            logger.info(
+                "node=%(node)s event=end step=%(step)s action=%(action)s "
+                "error=%(error)s tokens=%(tokens)s",
+                details,
+            )
+        logger.info("*" * 70)
         return update
 
     return run

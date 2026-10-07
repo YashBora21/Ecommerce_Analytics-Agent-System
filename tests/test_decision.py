@@ -1,6 +1,6 @@
 ﻿import unittest
 
-from backend.agent.decision import chart_required, parse_action
+from backend.agent.decision import parse_action, parse_action_json
 
 
 class DecisionTests(unittest.TestCase):
@@ -40,31 +40,16 @@ class DecisionTests(unittest.TestCase):
                 },
             })
 
+    def test_json_parser_rejects_invalid_json(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_action_json("{not valid json}")
     def test_rejects_unknown_action(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid next action"):
             parse_action({"action": "delete_data", "reason": "bad", "arguments": {}})
 
-    def test_chart_requirement_uses_evidence_not_question_templates(self) -> None:
-        state = {
-            "question": "Summarize this result",
-            "evidence": [{
-                "kind": "sql",
-                "result": "region,revenue\nA,10\nB,20\nC,30",
-            }],
-        }
-        self.assertTrue(chart_required(state))
-        state["question"] = "Summarize this result, text only"
-        self.assertFalse(chart_required(state))
-
-        state = {
-            "question": "Are these measures related?",
-            "evidence": [{
-                "kind": "statistics",
-                "result": '{"operation":"correlation","value":0.4,"count":100}',
-            }],
-        }
-        self.assertTrue(chart_required(state))
 
 
 if __name__ == "__main__":
     unittest.main()
+
+

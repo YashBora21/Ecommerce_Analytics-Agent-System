@@ -1,4 +1,4 @@
-﻿import os
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -73,7 +73,9 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(get_usage()["total_tokens"], 11)
 
     def test_node_wrapper_logs_start_and_end(self) -> None:
-        node = logged_node("demo", lambda state: {"steps": 1, "error": ""})
+        node = logged_node(
+            "demo", lambda state: {"steps": 1, "sql": "SELECT secret", "error": ""}
+        )
 
         with self.assertLogs("ecommerce_agent", level="INFO") as logs:
             node({"steps": 0})
@@ -81,6 +83,20 @@ class TelemetryTests(unittest.TestCase):
         output = "\n".join(logs.output)
         self.assertIn("node=demo event=start", output)
         self.assertIn("node=demo event=end", output)
+        self.assertIn("*" * 70, output)
+        self.assertNotIn("sql=", output)
+
+    def test_sql_nodes_log_the_query(self) -> None:
+        node = logged_node(
+            "execute", lambda state: {"sql": "SELECT 1\nFROM orders", "error": ""}
+        )
+
+        with self.assertLogs("ecommerce_agent", level="INFO") as logs:
+            node({"steps": 1})
+
+        output = "\n".join(logs.output)
+        self.assertIn("sql=SELECT 1 FROM orders", output)
+        self.assertNotIn("SELECT 1\nFROM orders", output)
 
 
 if __name__ == "__main__":

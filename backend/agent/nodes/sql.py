@@ -1,10 +1,29 @@
-import json
+﻿from typing import Annotated, Literal
 
 from groq import GroqError
+from pydantic import BaseModel, StringConstraints, ValidationError, model_validator
 
 from backend.agent.memory import format_evidence, recent_context
 from backend.agent.prompt import SQL_SYSTEM_PROMPT
 from backend.agent.state import LlmCall, Message, QueryState, SqlRunner
+
+
+Text = Annotated[str, StringConstraints(strip_whitespace=True)]
+
+
+class SqlPlan(BaseModel):
+    action: Literal["query", "answer"] = "query"
+    sql: Text = ""
+    reason: Text = ""
+    final_answer: Text = ""
+
+    @model_validator(mode="after")
+    def required_content(self):
+        if self.action == "query" and not self.sql:
+            raise ValueError("SQL is empty")
+        if self.action == "answer" and not self.final_answer:
+            raise ValueError("direct answer is empty")
+        return self
 
 
 def make_generate_sql(llm_call: LlmCall):
@@ -15,24 +34,33 @@ def make_generate_sql(llm_call: LlmCall):
         action = state.get("action", {})
         goal = action.get("args", {}).get("next_query_goal")
         if goal:
-            content += f"\n\nAdditional query goal: {goal}"
-            content += f"\n\nEvidence already collected:\n{format_evidence(state)}"
-        if state.get("error") and state.get("sql"):
-            content += (
-                f"\n\nPrevious SQL: {state['sql']}\n"
-                f"Validation error: {state['error']}\nReturn corrected SQL."
-            )
+            content += f"""
 
+Additional query goal: {goal}
+
+Evidence already collected:
+{format_evidence(state)}"""
+        if state.get("error") and state.get("sql"):
+            content += f"""
+
+Previous SQL: {state['sql']}
+Validation error: {state['error']}
+Return corrected SQL."""
         messages: list[Message] = [{"role": "system", "content": SQL_SYSTEM_PROMPT}]
         context = recent_context(state)
         if context:
             messages.append({"role": "system", "content": context})
         messages.append({"role": "user", "content": content})
         try:
-            sql = json.loads(llm_call(messages)).get("sql")
-            if not isinstance(sql, str) or not sql.strip():
-                raise ValueError("Groq response did not contain SQL")
-            sql = sql.strip()
+            plan = SqlPlan.model_validate_json(llm_call(messages))
+            if plan.action == "answer":
+                return {
+                    "final_answer": plan.final_answer,
+                    "steps": steps,
+                    "error": "",
+                }
+
+            sql = plan.sql
             previous_sql = {
                 item["sql"]
                 for item in state.get("evidence", [])
@@ -49,7 +77,7 @@ def make_generate_sql(llm_call: LlmCall):
                     ),
                 }
             return {"sql": sql, "sql_tries": tries, "steps": steps, "error": ""}
-        except (json.JSONDecodeError, TypeError, ValueError, RuntimeError, GroqError) as error:
+        except (ValidationError, RuntimeError, GroqError) as error:
             return {
                 "sql_tries": tries,
                 "steps": steps,
@@ -69,3 +97,4 @@ def make_execute_query(sql_runner: SqlRunner):
         return {"evidence": evidence, "sql_tries": 0, "error": ""}
 
     return execute_query
+

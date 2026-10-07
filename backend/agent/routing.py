@@ -1,11 +1,9 @@
-from backend.agent.state import MAX_AGENT_STEPS, MAX_CHART_TRIES, MAX_SQL_TRIES, QueryState
-
-
-def after_guardrail(state: QueryState) -> str:
-    return "failure" if state.get("error") else state["route"]
+﻿from backend.agent.state import MAX_AGENT_STEPS, MAX_CHART_TRIES, MAX_SQL_TRIES, QueryState
 
 
 def after_generation(state: QueryState) -> str:
+    if state.get("final_answer"):
+        return "done"
     if not state.get("error"):
         return "execute"
     return "generate_sql" if state.get("sql_tries", 0) < MAX_SQL_TRIES else "partial"
@@ -42,3 +40,5 @@ def after_chart(state: QueryState) -> str:
     if state.get("chart_tries", 0) >= MAX_CHART_TRIES:
         return "partial"
     return "assess"
+
+
