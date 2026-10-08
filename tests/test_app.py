@@ -1,5 +1,7 @@
-﻿import json
+import json
+import time
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -75,6 +77,25 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["chart"]["data"][0]["type"], "bar")
+
+    def test_slow_query_returns_job_and_can_be_polled(self) -> None:
+        def slow_agent(question, thread_id=None):
+            time.sleep(0.05)
+            return {"final_answer": "Completed later.", "evidence": []}
+
+        app.dependency_overrides[get_agent] = lambda: slow_agent
+        client = TestClient(app)
+        with patch("backend.app.SYNC_QUERY_SECONDS", 0.001):
+            queued = client.post("/api/query", json={"question": "Run slowly"})
+
+        self.assertEqual(queued.status_code, 202)
+        poll_url = queued.json()["poll_url"]
+        for _ in range(20):
+            completed = client.get(poll_url)
+            if completed.json()["status"] == "completed":
+                break
+            time.sleep(0.01)
+        self.assertEqual(completed.json()["answer"], "Completed later.")
 
     def test_rejects_blank_question(self) -> None:
         def should_not_run(question, thread_id=None):

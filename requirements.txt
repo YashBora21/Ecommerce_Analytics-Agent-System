@@ -6,3 +6,6 @@ plotly
 psycopg[binary]
 python-dotenv
 uvicorn
+sqlglot>=28,<29
+langgraph-checkpoint-postgres>=3,<4
+psycopg-pool>=3,<4

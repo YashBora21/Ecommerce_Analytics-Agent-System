@@ -1,5 +1,4 @@
-﻿import os
-import re
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -7,7 +6,9 @@ from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
-from psycopg.rows import dict_row
+
+from backend.db.postgres import postgres_connection
+from backend.tools.sql_analysis import validate_sql
 
 
 DB_FILE = Path(__file__).resolve().parents[1] / "db" / "ecommerce.db"
@@ -25,24 +26,15 @@ ALLOWED_ACTIONS = {
 }
 
 
-def check_sql(sql: str) -> str:
-    """Normalize one SELECT statement or raise a clear validation error."""
-    if not isinstance(sql, str) or not sql.strip():
-        raise ValueError("SQL must be a non-empty string")
-
+def check_sql(
+    sql: str,
+    allowed_tables: set[str] | None = None,
+    allowed_artifacts: set[str] | None = None,
+) -> str:
+    """Validate one read-only query and return its normalized input text."""
+    validate_sql(sql, allowed_tables, allowed_artifacts)
     query = sql.strip()
-    if "\x00" in query:
-        raise ValueError("SQL cannot contain null bytes")
-    if "--" in query or "/*" in query or "*/" in query:
-        raise ValueError("SQL comments are not allowed")
-
-    if query.endswith(";"):
-        query = query[:-1].rstrip()
-    if ";" in query:
-        raise ValueError("Only one SQL statement is allowed")
-    if not re.match(r"(?:SELECT|WITH)\b", query, re.IGNORECASE):
-        raise ValueError("Only SELECT queries are allowed")
-    return query
+    return query[:-1].rstrip() if query.endswith(";") else query
 
 
 def authorizer(
@@ -82,10 +74,11 @@ def execute_postgres(
     timeout: float,
 ) -> dict[str, Any]:
     """Execute a query in a read-only PostgreSQL transaction."""
-    with psycopg.connect(database_url, row_factory=dict_row) as connection:
+    with postgres_connection(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SET TRANSACTION READ ONLY")
             cursor.execute("SELECT set_config('statement_timeout', %s, true)", (str(int(timeout * 1_000)),))
+            cursor.execute("SELECT set_config('lock_timeout', %s, true)", ("2000",))
             cursor.execute(query)
             fetched = cursor.fetchmany(limit + 1)
             columns = [description.name for description in cursor.description or []]
@@ -106,10 +99,12 @@ def execute_sql(
     path: Path | None = None,
     limit: int = DEFAULT_LIMIT,
     timeout: float = DEFAULT_TIMEOUT,
+    allowed_tables: set[str] | None = None,
+    allowed_artifacts: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run one validated read-only query and always return the same shape."""
     try:
-        query = check_sql(sql)
+        query = check_sql(sql, allowed_tables, allowed_artifacts)
         if not 1 <= limit <= MAX_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_LIMIT}")
         if timeout <= 0:

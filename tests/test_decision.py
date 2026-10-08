@@ -1,6 +1,6 @@
 ﻿import unittest
 
-from backend.agent.decision import parse_action, parse_action_json
+from backend.agent.decision import decision_json_schema, parse_action, parse_action_json
 
 
 class DecisionTests(unittest.TestCase):
@@ -43,6 +43,48 @@ class DecisionTests(unittest.TestCase):
     def test_json_parser_rejects_invalid_json(self) -> None:
         with self.assertRaises(ValueError):
             parse_action_json("{not valid json}")
+
+    def test_rejects_oversized_final_answer(self) -> None:
+        with self.assertRaisesRegex(ValueError, "at most 5000 characters"):
+            parse_action({
+                "action": "answer",
+                "reason": "Too much output",
+                "arguments": {"final_answer": "x" * 5_001},
+            })
+
+    def test_generation_schema_is_strict(self) -> None:
+        objects = []
+
+        def collect(value):
+            if isinstance(value, dict):
+                if value.get("type") == "object":
+                    objects.append(value)
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        schema = decision_json_schema()
+        collect(schema)
+
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("anyOf", schema["properties"]["decision"])
+        self.assertTrue(objects)
+        self.assertTrue(all(item["additionalProperties"] is False for item in objects))
+        self.assertTrue(all(
+            set(item.get("properties", {})) == set(item["required"])
+            for item in objects
+        ))
+
+    def test_query_action_requires_sql(self) -> None:
+        action = parse_action({
+            "action": "query_sql",
+            "reason": "Need data",
+            "arguments": {"sql": " SELECT COUNT(*) FROM orders "},
+        })
+        self.assertEqual(action["args"]["sql"], "SELECT COUNT(*) FROM orders")
+
     def test_rejects_unknown_action(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid next action"):
             parse_action({"action": "delete_data", "reason": "bad", "arguments": {}})

@@ -1,11 +1,17 @@
-from backend.agent.memory import latest_sql_result
+from backend.agent.memory import sql_result
 from backend.agent.state import QueryState
 
 
 def make_calculate_statistic(statistics_runner):
     def calculate_statistic(state: QueryState) -> QueryState:
         args = dict(state["action"]["args"])
-        args["csv_data"] = latest_sql_result(state)
+        required = {args["column"]}
+        if args.get("second_column"):
+            required.add(args["second_column"])
+        try:
+            args["csv_data"] = sql_result(state, required)
+        except ValueError as error:
+            return {"error": f"Rejected: {error}"}
         result = statistics_runner(args)
         if result.startswith("Rejected:"):
             return {"error": result}
@@ -22,7 +28,20 @@ def make_create_plot(chart_runner, remember):
         tries = state.get("chart_tries", 0) + 1
         args = dict(state["action"]["args"])
         answer = args.pop("final_answer")
-        args["csv_data"] = latest_sql_result(state)
+        required = {column for column in (
+            args.get("x_column"),
+            args.get("y_column"),
+            args.get("value_column"),
+            *(args.get("path_columns") or []),
+        ) if column}
+        try:
+            args["csv_data"] = sql_result(state, required)
+        except ValueError as error:
+            return {
+                "chart_tries": tries,
+                "action": {},
+                "error": f"Rejected: {error}",
+            }
         result = chart_runner(args)
         if result.startswith("Rejected:"):
             return {

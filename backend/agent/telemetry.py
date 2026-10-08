@@ -7,6 +7,7 @@ _usage = ContextVar(
     "groq_usage",
     default={"input_tokens": 0, "output_tokens": 0},
 )
+_cancel_checker = ContextVar("cancel_checker", default=lambda: False)
 
 logger = logging.getLogger("ecommerce_agent")
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
@@ -29,6 +30,14 @@ def add_usage(input_tokens: int, output_tokens: int) -> None:
     usage["output_tokens"] += output_tokens
 
 
+def set_cancel_checker(checker) -> None:
+    _cancel_checker.set(checker)
+
+
+def reset_cancel_checker() -> None:
+    _cancel_checker.set(lambda: False)
+
+
 def get_usage() -> dict[str, int]:
     usage = _usage.get()
     return {
@@ -39,6 +48,8 @@ def get_usage() -> dict[str, int]:
 
 def logged_node(name, node):
     def run(state):
+        if _cancel_checker.get()():
+            raise RuntimeError("Query run was cancelled")
         logger.info("node=%s event=start step=%s", name, state.get("steps", 0))
         try:
             update = node(state)
@@ -55,7 +66,7 @@ def logged_node(name, node):
             "error": error,
             "tokens": get_usage(),
         }
-        if name in {"generate_sql", "execute"}:
+        if name == "sql":
             sql = update.get("sql", state.get("sql", ""))
             details["sql"] = " ".join(sql.split())
             logger.info(

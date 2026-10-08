@@ -1,6 +1,15 @@
-﻿from typing import Annotated
+from copy import deepcopy
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from backend.tools.chart import SUPPORTED_CHARTS
 from backend.tools.statistics import SUPPORTED_OPERATIONS
@@ -8,17 +17,25 @@ from backend.tools.statistics import SUPPORTED_OPERATIONS
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True)]
 RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+FinalAnswer = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=5_000),
+]
 
 
-class AnswerArgs(BaseModel):
-    final_answer: RequiredText
+class Arguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
-class QueryArgs(BaseModel):
-    next_query_goal: RequiredText
+class AnswerArgs(Arguments):
+    final_answer: FinalAnswer
 
 
-class StatisticsArgs(BaseModel):
+class QueryArgs(Arguments):
+    sql: RequiredText
+
+
+class StatisticsArgs(Arguments):
     operation: RequiredText
     column: RequiredText
     second_column: Text = ""
@@ -40,14 +57,14 @@ class StatisticsArgs(BaseModel):
         return self
 
 
-class ChartArgs(BaseModel):
+class ChartArgs(Arguments):
     chart_type: RequiredText
     x_column: Text = ""
     y_column: Text = ""
     value_column: Text = ""
     path_columns: list[RequiredText] = Field(default_factory=list)
     title: Text = ""
-    final_answer: RequiredText
+    final_answer: FinalAnswer
 
     @field_validator("chart_type")
     @classmethod
@@ -58,48 +75,94 @@ class ChartArgs(BaseModel):
 
     @model_validator(mode="after")
     def required_columns(self):
-        if self.chart_type == "heatmap" and not all(
-            (self.x_column, self.y_column, self.value_column)
-        ):
+        if self.chart_type == "heatmap" and not all((self.x_column, self.y_column, self.value_column)):
             raise ValueError("heatmap requires x, y, and value columns")
-        if self.chart_type == "treemap" and (
-            not self.path_columns or not self.value_column
-        ):
+        if self.chart_type == "treemap" and (not self.path_columns or not self.value_column):
             raise ValueError("treemap requires path and value columns")
-        if self.chart_type not in {"heatmap", "treemap"} and not all(
-            (self.x_column, self.y_column)
-        ):
+        if self.chart_type not in {"heatmap", "treemap"} and not all((self.x_column, self.y_column)):
             raise ValueError("chart requires x and y columns")
         return self
 
 
-ACTION_ARGUMENTS = {
-    "answer": AnswerArgs,
-    "query_sql": QueryArgs,
-    "calculate_statistics": StatisticsArgs,
-    "create_chart": ChartArgs,
+class Decision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Text = ""
+
+
+class AnswerDecision(Decision):
+    action: Literal["answer", "clarify", "stop"]
+    arguments: AnswerArgs
+
+
+class QueryDecision(Decision):
+    action: Literal["query_sql"]
+    arguments: QueryArgs
+
+
+class StatisticsDecision(Decision):
+    action: Literal["calculate_statistics"]
+    arguments: StatisticsArgs
+
+
+class ChartDecision(Decision):
+    action: Literal["create_chart"]
+    arguments: ChartArgs
+
+
+DecisionType = AnswerDecision | QueryDecision | StatisticsDecision | ChartDecision
+DECISION_ADAPTER = TypeAdapter(DecisionType)
+
+
+class DecisionEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: DecisionType
+
+
+ACTIONS = {
+    "answer",
+    "clarify",
+    "stop",
+    "query_sql",
+    "calculate_statistics",
+    "create_chart",
 }
 
 
-class Decision(BaseModel):
-    action: RequiredText
-    reason: Text
-    arguments: dict
+def _strict_schema(value):
+    if isinstance(value, dict):
+        schema = {key: _strict_schema(item) for key, item in value.items() if key != "default"}
+        if schema.get("type") == "object":
+            properties = schema.get("properties", {})
+            schema["additionalProperties"] = False
+            schema["required"] = list(properties)
+        return schema
+    if isinstance(value, list):
+        return [_strict_schema(item) for item in value]
+    return value
 
-    @field_validator("action")
-    @classmethod
-    def supported_action(cls, action: str) -> str:
-        if action not in ACTION_ARGUMENTS:
-            raise ValueError("invalid next action")
-        return action
+
+def decision_json_schema() -> dict:
+    """Return Groq's strict JSON schema generated from the Pydantic models."""
+    return _strict_schema(deepcopy(DecisionEnvelope.model_json_schema()))
 
 
+def _as_action(decision: DecisionType) -> dict:
+    return {
+        "name": decision.action,
+        "args": decision.arguments.model_dump(),
+    }
 
+
+def parse_action(value: dict) -> dict:
+    if not isinstance(value, dict) or value.get("action") not in ACTIONS:
+        raise ValueError("invalid next action")
+    return _as_action(DECISION_ADAPTER.validate_python(value))
 
 
 def parse_action_json(value: str) -> dict:
-    decision = Decision.model_validate_json(value)
-    arguments = ACTION_ARGUMENTS[decision.action].model_validate(decision.arguments)
-    return {"name": decision.action, "args": arguments.model_dump()}
-
-
+    try:
+        return _as_action(DecisionEnvelope.model_validate_json(value).decision)
+    except ValueError:
+        return _as_action(DECISION_ADAPTER.validate_json(value))

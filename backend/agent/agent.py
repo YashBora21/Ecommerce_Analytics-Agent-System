@@ -27,8 +27,12 @@ def ask(
             checkpointer=default_checkpointer,
         )
 
-    config = {"configurable": {"thread_id": thread_id or str(uuid.uuid4())}}
-    return graph.invoke({"question": question.strip()}, config=config)
+    owner_id = thread_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": owner_id}}
+    return graph.invoke(
+        {"question": question.strip(), "owner_id": owner_id},
+        config=config,
+    )
 
 
 __all__ = [

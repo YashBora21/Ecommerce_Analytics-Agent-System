@@ -4,7 +4,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.tools.sql import run_sql
+from backend.tools.sql import run_managed_sql, run_sql
 from backend.tools.sql_core import execute_sql
 
 
@@ -88,6 +88,31 @@ class SqlToolTests(unittest.TestCase):
         output = run_sql.invoke({"query": "SELECT state, revenue FROM orders"})
 
         self.assertEqual(output, 'state,revenue\n"Rio, Metro",100.5')
+
+    @patch("backend.tools.sql.execute_sql")
+    def test_passes_artifact_ownership_to_execution(self, execute_sql_mock) -> None:
+        execute_sql_mock.return_value = {
+            "ok": True,
+            "columns": ["value"],
+            "rows": [{"value": 1}],
+            "row_count": 1,
+            "truncated": False,
+            "error": None,
+        }
+        allowed_tables = {"orders"}
+        allowed_artifacts = {"agent_results.result_owned"}
+
+        run_managed_sql(
+            "SELECT value FROM agent_results.result_owned",
+            allowed_tables=allowed_tables,
+            allowed_artifacts=allowed_artifacts,
+        )
+
+        execute_sql_mock.assert_called_once_with(
+            "SELECT value FROM agent_results.result_owned",
+            allowed_tables=allowed_tables,
+            allowed_artifacts=allowed_artifacts,
+        )
 
     @patch("backend.tools.sql.execute_sql")
     def test_returns_validation_error_to_the_agent(self, execute_sql_mock) -> None:

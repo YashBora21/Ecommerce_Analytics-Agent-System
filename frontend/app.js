@@ -1,4 +1,4 @@
-﻿const API = window.location.origin;
+const API = window.location.origin;
 const form = document.querySelector("#question-form");
 const input = document.querySelector("#question");
 const send = document.querySelector("#send");
@@ -21,6 +21,18 @@ function addMessage(role, text, usage) {
   messages.appendChild(article);
   article.scrollIntoView({ behavior: "smooth", block: "end" });
   return article;
+}
+
+async function waitForRun(pollUrl) {
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const response = await fetch(`${API}${pollUrl}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not check query status");
+    if (data.status === "completed") return data;
+    if (data.status === "failed") throw new Error(data.error || "Query failed");
+    if (data.status === "cancelled") throw new Error("Query was cancelled");
+  }
 }
 
 async function checkHealth() {
@@ -51,8 +63,12 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, thread_id: threadId }),
     });
-    const data = await response.json();
+    let data = await response.json();
     if (!response.ok) throw new Error(data.detail || "Request failed");
+    if (response.status === 202) {
+      pending.querySelector(".bubble").textContent = "Query queued; waiting for completion.";
+      data = await waitForRun(data.poll_url);
+    }
 
     threadId = data.thread_id;
     sessionStorage.setItem("ecommerce-thread", threadId);

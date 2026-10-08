@@ -1,65 +1,61 @@
-﻿# Olist Ecommerce Analytics Agent
+# Ecommerce Analytics Agent
 
-A bounded LangGraph Query Agent for natural-language analysis over the complete relational Olist ecommerce dataset.
+A bounded LangGraph Query Agent for natural-language analysis over a PostgreSQL or local SQLite database.
 
-## Architecture
+## Flow
 
 ```text
-JavaScript UI -> FastAPI -> guardrail -> Query Agent
-                                      -> validated read-only SQL -> SQLite
-                                      -> statistics tool
-                                      -> Plotly chart tool
+question -> relevant live schema -> Query Agent -> validated SQL/tool
+         -> Query Agent -> another tool or grounded answer
 ```
 
-The LLM chooses structured actions (`query_sql`, `calculate_statistics`, `create_chart`, or `answer`). Python validates every action, SQL is executed on a read-only SQLite connection, and the graph limits SQL retries and total steps.
+The same Query Agent chooses SQL, statistics, charts, clarification, or an
+answer. Code—not prompts—enforces read-only SQL, discovered-table access,
+artifact ownership, duplicate detection, join rules, planner limits, and
+bounded retries, time, and token use.
 
-SQLite preserves all nine source datasets as relational tables: `orders`, `customers`, `order_items`, `payments`, `reviews`, `products`, `sellers`, `geolocation`, and `category_translation`. Prompt rules define grains, joins, metrics, missing values, and one-to-many fan-out protection.
+Large or reusable PostgreSQL results are materialized under `agent_results`. LangGraph state keeps only bounded evidence and artifact metadata. Artifacts expire after 24 hours by default and can be queried by later steps without loading all rows into memory.
 
 ## Setup
 
 ```powershell
 python -m pip install -r requirements.txt
-python backend\db\prepare_data.py
-```
-
-Create `.env` with `GROQ_API_KEY` and optionally `GROQ_MODEL`.
-
-Start backend and frontend:
-
-```powershell
+Copy-Item .env.example .env
 npm run dev
 ```
 
-- Frontend: `http://127.0.0.1:5500`
+For local SQLite use, prepare `backend/db/ecommerce.db` first. For PostgreSQL, set `DATABASE_URL`. Set `CHECKPOINT_DATABASE_URL` and `JOB_DATABASE_URL` to enable durable conversation checkpoints and resumable queued runs; they may use the same Neon database URL.
+
+- App and API: `http://127.0.0.1:8000`
 - API docs: `http://127.0.0.1:8000/docs`
 
-## API and memory
+## API
 
-- `GET /api/health` checks read-only database access.
-- `POST /api/query` accepts `question` and optional `thread_id`; it returns the grounded answer, optional Plotly JSON, evidence, reusable thread ID, and token usage.
+- `GET /api/health` checks database access.
+- `POST /api/query` accepts `question` and optional `thread_id`.
+- `GET /api/runs/{run_id}` polls a queued query.
+- `DELETE /api/runs/{run_id}` requests cancellation.
 
-Reuse `thread_id` for follow-ups. Memory keeps recent turns, a rolling summary, and the last successful SQL.
+A quick query returns immediately. A longer query returns HTTP 202 with a polling URL. Reuse `thread_id` for contextual follow-ups and artifact ownership.
 
-## Safety and limits
+## Safety
 
-- Only one `SELECT` or `WITH` statement is accepted.
-- SQLite uses read-only/query-only mode and an operation allowlist.
-- Queries time out after fifteen seconds and results are capped.
-- Invalid SQL gets at most three attempts; new rounds are gated at five agent steps.
-- Statistics and charts reject truncated results.
+- SQLGlot parses exactly one PostgreSQL read-only query.
+- DDL, DML, comments, system schemas, dangerous functions, cross joins, and joins without predicates are rejected.
+- Only discovered source tables and unexpired artifacts owned by the current thread are accepted.
+- PostgreSQL `EXPLAIN (FORMAT JSON)` routes genuinely expensive SQL back for revision; AST complexity is reported but does not reject valid SQL.
+- Source reads use read-only transactions with statement and lock timeouts.
+- Row, byte, retry, step, token, execution, chart, and artifact limits are configurable in `.env`.
+- Incomplete or failed tool results are never presented as confirmed conclusions.
+
+The PostgreSQL role should have `SELECT` on source schemas and write access only to `agent_results`; database grants remain the final security boundary.
 
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -v
+python -m pytest -q
 ```
 
-## Deploy to Render
+## Render
 
-1. Import the local CSV files once with: python -m backend.db.prepare_neon
-2. Push the repository to GitHub. The generated SQLite file and source CSV files are intentionally ignored.
-3. In Render, create a Blueprint from the repository's render.yaml.
-4. Enter GROQ_API_KEY and DATABASE_URL when Render requests the secret values.
-5. Open the generated onrender.com URL. The same FastAPI service serves the frontend and API routes.
-
-The Neon importer refuses to run when any target Olist table already exists, so it cannot overwrite an existing import.
+Create a Blueprint from `render.yaml`, then set `GROQ_API_KEY`, `DATABASE_URL`, `CHECKPOINT_DATABASE_URL`, and `JOB_DATABASE_URL`. The FastAPI service serves both the API and JavaScript frontend.

@@ -1,3 +1,6 @@
+import csv
+import io
+
 from backend.agent.prompt import MEMORY_SUMMARY_PROMPT
 from backend.agent.state import LlmCall, MAX_RECENT_MESSAGES, QueryState
 
@@ -9,11 +12,26 @@ def format_evidence(state: QueryState) -> str:
     )
 
 
-def latest_sql_result(state: QueryState) -> str:
+def sql_result(
+    state: QueryState,
+    required_columns: set[str] | None = None,
+) -> str:
+    required = required_columns or set()
     for item in reversed(state.get("evidence", [])):
-        if item.get("kind", "sql") == "sql":
-            return item["result"]
-    raise ValueError("No SQL result is available")
+        if item.get("kind", "sql") != "sql":
+            continue
+        if not item.get("complete", True):
+            continue
+        if required:
+            header = next(csv.reader(io.StringIO(item["result"])), [])
+            if not required <= set(header):
+                continue
+        if item.get("artifact_id"):
+            raise ValueError(
+                "Large artifact results must be aggregated with query_sql before using this tool"
+            )
+        return item["result"]
+    raise ValueError("No complete SQL result with the required columns is available")
 
 
 def recent_context(state: QueryState) -> str:
@@ -22,6 +40,19 @@ def recent_context(state: QueryState) -> str:
         parts.append(f"Earlier summary: {state['history_summary']}")
     if state.get("last_sql"):
         parts.append(f"Last successful SQL: {state['last_sql']}")
+    artifacts = [
+        {
+            "artifact_id": item.get("artifact_id"),
+            "relation": item.get("relation"),
+            "row_count": item.get("row_count"),
+            "columns": item.get("columns"),
+            "expires_at": item.get("expires_at"),
+        }
+        for item in state.get("artifacts", [])
+        if item.get("complete")
+    ]
+    if artifacts:
+        parts.append(f"Available result artifacts: {artifacts}")
     history = state.get("history", [])[-MAX_RECENT_MESSAGES:]
     if history:
         messages = "\n".join(

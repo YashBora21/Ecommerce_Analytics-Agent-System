@@ -4,12 +4,20 @@
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT --no-access-log
     healthCheckPath: /api/health
     envVars:
       - key: GROQ_API_KEY
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: CHECKPOINT_DATABASE_URL
+        sync: false
+      - key: JOB_DATABASE_URL
+        sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-120b
+      - key: ARTIFACT_TTL_HOURS
+        value: 154
+      - key: SYNC_QUERY_SECONDS
+        value: 15
