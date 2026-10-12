@@ -75,6 +75,31 @@ class QueryGraphTests(unittest.TestCase):
         self.assertEqual(result["final_answer"], "Average revenue is 20.")
         self.assertEqual(result["evidence"][-1]["kind"], "statistics")
 
+    def test_duplicate_statistic_is_not_calculated_twice(self) -> None:
+        statistic = action("calculate_statistics", operation="median", column="revenue")
+        llm = ScriptedLlm(
+            action("query_sql", sql="SELECT revenue FROM orders"),
+            statistic,
+            statistic,
+            action("answer", final_answer="Median revenue is 20."),
+        )
+        calls = []
+
+        result = build_query_graph(
+            llm,
+            lambda _sql: "revenue\n10\n20\n30",
+            statistics_runner=lambda request: calls.append(request) or (
+                '{"ok":true,"operation":"median","column":"revenue",'
+                '"second_column":null,"value":20.0,"count":3,"error":null}'
+            ),
+        ).invoke({"question": "What is median revenue?"})
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            result["final_answer"],
+            "Median for revenue: 20.0 (based on 3 rows).",
+        )
+
     def test_agent_can_create_a_chart(self) -> None:
         llm = ScriptedLlm(
             action("query_sql", sql="SELECT month, revenue FROM monthly_sales"),

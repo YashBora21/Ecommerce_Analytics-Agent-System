@@ -23,24 +23,51 @@ SIMPLE_OPERATIONS = {
 }
 
 
+def _number(row: dict[str, str], column: str, row_number: int) -> float | None:
+    value = row.get(column)
+    if value is None or not value.strip():
+        return None
+    try:
+        return float(value)
+    except ValueError as error:
+        raise ValueError(
+            f"Column {column} contains a nonnumeric value on row {row_number}"
+        ) from error
+
+
 def _numbers(rows: list[dict[str, str]], column: str) -> list[float]:
     if not rows or column not in rows[0]:
         raise ValueError(f"Column not found: {column}")
 
     values = []
     for row_number, row in enumerate(rows, start=1):
-        value = row[column].strip()
-        if not value:
-            continue
-        try:
-            values.append(float(value))
-        except ValueError as error:
-            raise ValueError(
-                f"Column {column} contains a nonnumeric value on row {row_number}"
-            ) from error
+        value = _number(row, column, row_number)
+        if value is not None:
+            values.append(value)
     if not values:
         raise ValueError(f"Column has no numeric values: {column}")
     return values
+
+
+def _number_pairs(
+    rows: list[dict[str, str]],
+    first_column: str,
+    second_column: str,
+) -> tuple[list[float], list[float]]:
+    if not rows or first_column not in rows[0] or second_column not in rows[0]:
+        missing = first_column if not rows or first_column not in rows[0] else second_column
+        raise ValueError(f"Column not found: {missing}")
+
+    pairs = []
+    for row_number, row in enumerate(rows, start=1):
+        first = _number(row, first_column, row_number)
+        second = _number(row, second_column, row_number)
+        if first is not None and second is not None:
+            pairs.append((first, second))
+    if not pairs:
+        raise ValueError("The selected columns have no matching numeric rows")
+    first_values, second_values = zip(*pairs)
+    return list(first_values), list(second_values)
 
 
 def _percentile(values: list[float], percentile: float) -> float:
@@ -191,8 +218,13 @@ def calculate_statistics(
         if "[Results truncated]" in csv_data:
             raise ValueError("Statistics require complete SQL results")
         rows = list(csv.DictReader(io.StringIO(csv_data)))
-        first_values = _numbers(rows, column)
-        second_values = _numbers(rows, second_column) if second_column else []
+        if operation in {"correlation", "linear_regression"}:
+            if not second_column:
+                raise ValueError(f"second_column is required for {operation}")
+            first_values, second_values = _number_pairs(rows, column, second_column)
+        else:
+            first_values = _numbers(rows, column)
+            second_values = []
 
         if operation in SIMPLE_OPERATIONS:
             value = SIMPLE_OPERATIONS[operation](first_values)
@@ -201,20 +233,8 @@ def calculate_statistics(
                 raise ValueError("percentile value is required")
             value = _percentile(first_values, percentile)
         elif operation == "correlation":
-            if not second_column:
-                raise ValueError("second_column is required for correlation")
-            if not second_values:
-                raise ValueError(f"Column has no numeric values: {second_column}")
-            if len(first_values) != len(second_values):
-                raise ValueError("Correlation columns must have the same number of values")
             value = statistics.correlation(first_values, second_values)
         else:
-            if not second_column:
-                raise ValueError("second_column is required for linear_regression")
-            if not second_values:
-                raise ValueError(f"Column has no numeric values: {second_column}")
-            if len(first_values) != len(second_values):
-                raise ValueError("Regression columns must have the same number of values")
             regression = statistics.linear_regression(first_values, second_values)
             value = {
                 "slope": round(regression.slope, 6),
@@ -267,4 +287,3 @@ def run_statistics(
     if not result["ok"]:
         return f"Rejected: {result['error']}"
     return json.dumps(result, separators=(",", ":"))
-

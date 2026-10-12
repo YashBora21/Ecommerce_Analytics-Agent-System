@@ -125,7 +125,7 @@ def build_query_graph(
         "inspect_schema": make_inspect_schema(schema_runner),
         "agent": make_assess_result(llm_call, remember),
         "sql": make_execute_query(sql_runner, sql_analyzer),
-        "statistics": make_calculate_statistic(statistics_runner),
+        "statistics": make_calculate_statistic(statistics_runner, remember),
         "chart": make_create_plot(chart_runner, remember),
         "partial": partial_answer,
     }
@@ -150,7 +150,9 @@ def build_query_graph(
     )
     graph.add_conditional_edges("sql", after_sql, {"agent": "agent", "partial": "partial"})
     graph.add_conditional_edges(
-        "statistics", after_statistics, {"agent": "agent", "partial": "partial"}
+        "statistics",
+        after_statistics,
+        {"done": END, "agent": "agent", "partial": "partial"},
     )
     graph.add_conditional_edges(
         "chart", after_chart, {"done": END, "agent": "agent", "partial": "partial"}

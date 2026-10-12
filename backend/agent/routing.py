@@ -48,6 +48,8 @@ def after_sql(state: QueryState) -> str:
 
 
 def after_statistics(state: QueryState) -> str:
+    if state.get("final_answer"):
+        return "done"
     if not state.get("error"):
         return "agent"
     if state.get("statistics_tries", 0) >= MAX_STATISTICS_TRIES or budget_exhausted(state):

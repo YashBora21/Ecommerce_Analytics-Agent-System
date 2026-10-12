@@ -1,3 +1,5 @@
+import json
+
 from backend.agent.memory import sql_result
 from backend.agent.state import QueryState
 
@@ -38,7 +40,19 @@ def _tool_error(
     }
 
 
-def make_calculate_statistic(statistics_runner):
+def _statistics_answer(item: dict) -> str:
+    result = json.loads(item["result"])
+    operation = result["operation"].replace("_", " ").title()
+    columns = result["column"].replace("_", " ")
+    if result.get("second_column"):
+        columns += f" and {result['second_column'].replace('_', ' ')}"
+    value = result["value"]
+    if isinstance(value, dict):
+        value = ", ".join(f"{name}={number}" for name, number in value.items())
+    return f"{operation} for {columns}: {value} (based on {result['count']} rows)."
+
+
+def make_calculate_statistic(statistics_runner, remember):
     def calculate_statistic(state: QueryState) -> QueryState:
         tries = state.get("statistics_tries", 0) + 1
         args = dict(state["action"]["args"])
@@ -47,6 +61,39 @@ def make_calculate_statistic(statistics_runner):
             required.add(args["second_column"])
 
         artifact_id = args.get("artifact_id")
+        source = artifact_id or next(
+            (
+                item.get("sql_hash") or item.get("sql")
+                for item in reversed(state.get("evidence", []))
+                if item.get("kind", "sql") == "sql"
+            ),
+            "",
+        )
+        request = {
+            "operation": args["operation"],
+            "column": args["column"],
+            "second_column": args.get("second_column") or "",
+            "percentile": args.get("percentile"),
+            "source": source,
+        }
+        existing = next(
+            (
+                item
+                for item in reversed(state.get("evidence", []))
+                if item.get("kind") == "statistics"
+                and item.get("request") == request
+            ),
+            None,
+        )
+        if existing:
+            answer = _statistics_answer(existing)
+            return {
+                **remember(state, answer),
+                "statistics_tries": 0,
+                "action": {"name": "answer", "args": {"final_answer": answer}},
+                "error": "",
+            }
+
         if artifact_id:
             artifact = _owned_artifact(state, artifact_id)
             if not artifact:
@@ -82,7 +129,12 @@ def make_calculate_statistic(statistics_runner):
 
         evidence = list(state.get("evidence", []))
         label = f"STATISTICS {args['operation']}({args['column']})"
-        evidence.append({"kind": "statistics", "sql": label, "result": result})
+        evidence.append({
+            "kind": "statistics",
+            "sql": label,
+            "result": result,
+            "request": request,
+        })
         return {
             "evidence": evidence,
             "statistics_tries": 0,

@@ -25,6 +25,13 @@ class StatisticsTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertGreater(result["value"], 0.99)
 
+    def test_correlation_keeps_values_from_the_same_rows(self) -> None:
+        data = "x,y\n1,1\n,2\n3,\n4,4\n"
+        result = calculate_statistics(data, "correlation", "x", "y")
+
+        self.assertEqual(result["value"], 1.0)
+        self.assertEqual(result["count"], 2)
+
     def test_linear_regression_returns_slope_and_intercept(self) -> None:
         result = calculate_statistics(CSV_DATA, "linear_regression", "orders", "revenue")
         self.assertTrue(result["ok"])
