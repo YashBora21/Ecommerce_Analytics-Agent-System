@@ -62,7 +62,7 @@ def import_table(cursor, table: str, data_dir: Path) -> int:
 
 
 def prepare_neon(data_dir: Path = DATA_DIR) -> None:
-    """Import into an empty Neon database and validate of the Olist CSV files."""
+    """Import the Olist CSV files into an empty Neon database."""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not set")
@@ -96,7 +96,6 @@ def prepare_neon(data_dir: Path = DATA_DIR) -> None:
 
 if __name__ == "__main__":
     prepare_neon()
-
 
 
 

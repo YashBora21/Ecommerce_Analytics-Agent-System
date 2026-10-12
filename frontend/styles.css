@@ -18,6 +18,9 @@ header p { margin: 0; color: #dbeafe; }
 .message.error .bubble { color: #991b1b; background: #fee2e2; }
 .message small { margin-top: 6px; color: #718096; font-size: .72rem; }
 .chart { width: min(760px, 78vw); min-height: 360px; margin-top: 14px; }
+.artifacts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.artifacts a { padding: 8px 11px; border: 1px solid #bfdbfe; border-radius: 9px; color: #1d4ed8; text-decoration: none; background: #eff6ff; }
+.artifacts a:hover { background: #dbeafe; }
 .examples { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 32px 18px; }
 .examples button { border: 1px solid #cbd5e1; background: white; color: #334155; border-radius: 999px; padding: 8px 12px; cursor: pointer; }
 .examples button:hover { border-color: #1d4ed8; color: #1d4ed8; }

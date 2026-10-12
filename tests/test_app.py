@@ -1,22 +1,39 @@
 import json
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
 from backend.app import app, get_agent
+from backend.jobs import RunStore
 
 
 class ApiTests(unittest.TestCase):
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
 
-    def test_health_checks_database(self) -> None:
+    @patch("backend.app.execute_sql", return_value={"ok": True})
+    def test_health_checks_database(self, _execute_sql) -> None:
         response = TestClient(app).get("/api/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok", "database": "ok"})
+
+    def test_job_store_updates_only_supplied_fields(self) -> None:
+        store = RunStore()
+        store.database_url = "postgres://test"
+        connection = MagicMock()
+
+        with patch("backend.jobs.postgres_connection") as connect:
+            connect.return_value.__enter__.return_value = connection
+            store.update("run-1", status="completed", usage={"total_tokens": 3})
+
+        query, values = connection.execute.call_args.args
+        self.assertIn("status = %s", query)
+        self.assertIn("usage_json = %s", query)
+        self.assertNotIn("error = %s", query)
+        self.assertEqual(values[-1], "run-1")
 
     def test_serves_frontend(self) -> None:
         response = TestClient(app).get("/")
@@ -78,6 +95,88 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["chart"]["data"][0]["type"], "bar")
 
+    def test_query_exposes_only_downloadable_artifact_metadata(self) -> None:
+        def fake_agent(question, thread_id=None):
+            return {
+                "final_answer": "The complete result is available as CSV.",
+                "evidence": [{
+                    "kind": "sql",
+                    "sql": "SELECT seller_id, revenue FROM sellers",
+                    "result": "stored",
+                    "artifact_id": "00000000-0000-0000-0000-000000000001",
+                }],
+                "artifacts": [{
+                    "artifact_id": "00000000-0000-0000-0000-000000000001",
+                    "relation": "agent_results.secret_name",
+                    "row_count": 3000,
+                    "columns": [{"name": "seller_id"}, {"name": "revenue"}],
+                    "preview": [{"seller_id": "secret"}],
+                    "profile": [{"column_name": "revenue"}],
+                    "complete": True,
+                    "expires_at": "2030-01-01T00:00:00+00:00",
+                }],
+            }
+
+        app.dependency_overrides[get_agent] = lambda: fake_agent
+        body = TestClient(app).post("/api/query", json={"question": "Every seller"}).json()
+        artifact = body["artifacts"][0]
+
+        self.assertEqual(artifact["columns"], ["seller_id", "revenue"])
+        self.assertNotIn("artifact_id", artifact)
+        self.assertNotIn("relation", artifact)
+        self.assertNotIn("preview", artifact)
+        self.assertIn("/api/artifacts/", artifact["download_url"])
+
+    def test_query_does_not_repeat_an_old_artifact_download(self) -> None:
+        def fake_agent(question, thread_id=None):
+            return {
+                "final_answer": "The chart is ready.",
+                "evidence": [{"kind": "sql", "sql": "SELECT month", "result": "month\n2020-01"}],
+                "artifacts": [{
+                    "artifact_id": "00000000-0000-0000-0000-000000000001",
+                    "row_count": 96477,
+                    "columns": [{"name": "order_id"}],
+                    "complete": True,
+                    "expires_at": "2030-01-01T00:00:00+00:00",
+                }],
+            }
+
+        app.dependency_overrides[get_agent] = lambda: fake_agent
+        body = TestClient(app).post("/api/query", json={"question": "Show a chart"}).json()
+
+        self.assertEqual(body["artifacts"], [])
+
+    def test_artifact_download_checks_thread_ownership(self) -> None:
+        with patch("backend.app.artifact_csv", return_value=iter(["a,b\n", "1,2\n"])) as export:
+            response = TestClient(app).get(
+                "/api/artifacts/00000000-0000-0000-0000-000000000001",
+                params={"thread_id": "thread-1"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "a,b\n1,2\n")
+        export.assert_called_once_with(
+            "00000000-0000-0000-0000-000000000001",
+            "thread-1",
+        )
+
+    def test_incomplete_agent_result_is_not_reported_as_completed(self) -> None:
+        def incomplete_agent(question, thread_id=None):
+            return {
+                "final_answer": "The provider limit interrupted this analysis.",
+                "evidence": [],
+                "incomplete": True,
+            }
+
+        app.dependency_overrides[get_agent] = lambda: incomplete_agent
+        response = TestClient(app).post(
+            "/api/query",
+            json={"question": "Run a large analysis"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "incomplete")
+
     def test_slow_query_returns_job_and_can_be_polled(self) -> None:
         def slow_agent(question, thread_id=None):
             time.sleep(0.05)
@@ -119,4 +218,3 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

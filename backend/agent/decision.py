@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
-    Field,
     StringConstraints,
     TypeAdapter,
     field_validator,
@@ -33,13 +32,15 @@ class AnswerArgs(Arguments):
 
 class QueryArgs(Arguments):
     sql: RequiredText
+    result_scope: Literal["complete", "bounded"] = "complete"
 
 
 class StatisticsArgs(Arguments):
     operation: RequiredText
     column: RequiredText
-    second_column: Text = ""
+    second_column: Text | None = None
     percentile: float | None = None
+    artifact_id: Text | None = None
 
     @field_validator("operation")
     @classmethod
@@ -50,6 +51,8 @@ class StatisticsArgs(Arguments):
 
     @model_validator(mode="after")
     def required_arguments(self):
+        self.second_column = self.second_column or ""
+        self.artifact_id = self.artifact_id or ""
         if self.operation in {"correlation", "linear_regression"} and not self.second_column:
             raise ValueError(f"{self.operation} requires second_column")
         if self.operation == "percentile" and self.percentile is None:
@@ -59,11 +62,12 @@ class StatisticsArgs(Arguments):
 
 class ChartArgs(Arguments):
     chart_type: RequiredText
-    x_column: Text = ""
-    y_column: Text = ""
-    value_column: Text = ""
-    path_columns: list[RequiredText] = Field(default_factory=list)
-    title: Text = ""
+    x_column: Text | None = None
+    y_column: Text | None = None
+    value_column: Text | None = None
+    path_columns: list[RequiredText] | None = None
+    title: Text | None = None
+    artifact_id: Text | None = None
     final_answer: FinalAnswer
 
     @field_validator("chart_type")
@@ -75,6 +79,12 @@ class ChartArgs(Arguments):
 
     @model_validator(mode="after")
     def required_columns(self):
+        self.x_column = self.x_column or ""
+        self.y_column = self.y_column or ""
+        self.value_column = self.value_column or ""
+        self.path_columns = self.path_columns or []
+        self.title = self.title or ""
+        self.artifact_id = self.artifact_id or ""
         if self.chart_type == "heatmap" and not all((self.x_column, self.y_column, self.value_column)):
             raise ValueError("heatmap requires x, y, and value columns")
         if self.chart_type == "treemap" and (not self.path_columns or not self.value_column):

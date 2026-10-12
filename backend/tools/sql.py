@@ -5,17 +5,17 @@ import os
 
 from langchain_core.tools import tool
 
-from .artifacts import MATERIALIZE_ROWS, materialize_result
+from .artifacts import materialize_result
 from .sql_core import execute_sql
 
 
-def _csv(columns, rows) -> str:
-    output = io.StringIO()
-    writer = csv.writer(output, lineterminator="\n")
+def to_csv(columns, rows) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(columns)
     for row in rows:
-        writer.writerow([row[column] for column in columns])
-    return output.getvalue().strip()
+        writer.writerow([row[c] for c in columns])
+    return buf.getvalue().strip()
 
 
 def run_managed_sql(
@@ -25,45 +25,39 @@ def run_managed_sql(
     allowed_artifacts: set[str] | None = None,
     estimated_rows: int = 0,
 ) -> str:
-    """Execute a small result or materialize a large PostgreSQL result."""
-    can_materialize = bool(owner_id and os.getenv("DATABASE_URL"))
-    if can_materialize and estimated_rows > MATERIALIZE_ROWS:
-        artifact = materialize_result(
-            query,
-            owner_id,
-            allowed_tables or set(),
-            allowed_artifacts or set(),
-        )
-        preview = _csv(
-            [column["name"] for column in artifact["columns"]],
-            artifact["preview"],
-        )
-        return "[Artifact]\n" + json.dumps(artifact, default=str) + f"\nPreview:\n{preview}"
-
+    """Return small results inline; save big ones as an artifact."""
     result = execute_sql(
         query,
         allowed_tables=allowed_tables,
         allowed_artifacts=allowed_artifacts,
     )
+
     if not result["ok"]:
         return f"Rejected: {result['error']}"
     if not result["rows"]:
         return "Query ran successfully but returned no rows."
-    if result["truncated"] and can_materialize:
-        artifact = materialize_result(
-            query,
-            owner_id,
-            allowed_tables or set(),
-            allowed_artifacts or set(),
-        )
-        preview = _csv(
-            [column["name"] for column in artifact["columns"]],
-            artifact["preview"],
-        )
-        return "[Artifact]\n" + json.dumps(artifact, default=str) + f"\nPreview:\n{preview}"
 
-    text = _csv(result["columns"], result["rows"])
-    if result["truncated"]:
+    truncated = result["truncated"]
+
+    # only worth saving as an artifact if the result got cut off
+    # and we actually have somewhere to store it
+    if truncated and owner_id and os.getenv("DATABASE_URL"):
+        try:
+            artifact = materialize_result(
+                query,
+                owner_id,
+                allowed_tables or set(),
+                allowed_artifacts or set(),
+            )
+        except Exception as error:
+            return f"Rejected: {type(error).__name__}: {error}"
+
+        names = [c["name"] for c in artifact["columns"]]
+        preview = to_csv(names, artifact["preview"])
+        return f"[Artifact]\n{json.dumps(artifact, default=str)}\nPreview:\n{preview}"
+
+    text = to_csv(result["columns"], result["rows"])
+    if truncated:
         text += "\n[Results truncated]"
     return text
 

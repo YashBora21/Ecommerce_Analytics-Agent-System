@@ -1,6 +1,6 @@
 # Ecommerce Analytics Agent
 
-A bounded LangGraph Query Agent for natural-language analysis over a PostgreSQL or local SQLite database.
+A bounded LangGraph Query Agent for natural-language analysis over PostgreSQL.
 
 ## Flow
 
@@ -24,7 +24,7 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-For local SQLite use, prepare `backend/db/ecommerce.db` first. For PostgreSQL, set `DATABASE_URL`. Set `CHECKPOINT_DATABASE_URL` and `JOB_DATABASE_URL` to enable durable conversation checkpoints and resumable queued runs; they may use the same Neon database URL.
+Set `DATABASE_URL` to the PostgreSQL or Neon connection string. Set `CHECKPOINT_DATABASE_URL` and `JOB_DATABASE_URL` to enable durable conversation checkpoints and resumable queued runs; they may use the same database URL.
 
 - App and API: `http://127.0.0.1:8000`
 - API docs: `http://127.0.0.1:8000/docs`

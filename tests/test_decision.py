@@ -27,6 +27,19 @@ class DecisionTests(unittest.TestCase):
                 "arguments": {"operation": "linear_regression", "column": "orders"},
             })
 
+        action = parse_action({
+            "action": "calculate_statistics",
+            "reason": "Percentile requested",
+            "arguments": {
+                "operation": "percentile",
+                "column": "revenue",
+                "second_column": None,
+                "percentile": 90,
+                "artifact_id": "artifact-1",
+            },
+        })
+        self.assertEqual(action["args"]["second_column"], "")
+
     def test_validates_chart_shape(self) -> None:
         with self.assertRaisesRegex(ValueError, "heatmap requires"):
             parse_action({
@@ -93,5 +106,4 @@ class DecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

@@ -74,7 +74,7 @@ class TelemetryTests(unittest.TestCase):
         ), patch(
             "backend.agent.llm.Groq", return_value=client
         ):
-            result = call_groq(messages)
+            result = call_groq(messages, structured_output=True)
 
         self.assertIn('"action":"answer"', result)
         response_format = requests[0]["response_format"]
@@ -121,6 +121,33 @@ class TelemetryTests(unittest.TestCase):
             '{"action": "query_sql", "reason": "", '
             '"arguments": {"sql": "SELECT review_score FROM reviews"}}',
         )
+
+    def test_failed_generation_envelope_is_recovered(self) -> None:
+        error = GroqError("Generated JSON does not match the expected schema")
+        error.body = {
+            "error": {
+                "failed_generation": (
+                    '{"decision":{"action":"calculate_statistics","reason":"threshold",'
+                    '"arguments":{"operation":"percentile","column":"revenue",'
+                    '"second_column":null,"percentile":0.9,"artifact_id":"artifact-1"}}}'
+                )
+            }
+        }
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: (_ for _ in ()).throw(error))
+            )
+        )
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test"}), patch(
+            "backend.agent.llm.Groq", return_value=client
+        ):
+            result = call_groq(
+                [{"role": "user", "content": "Find the threshold"}],
+                structured_output=True,
+            )
+
+        self.assertIn('"calculate_statistics"', result)
 
     def test_rate_limit_is_retried_once(self) -> None:
         response = SimpleNamespace(

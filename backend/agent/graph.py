@@ -12,14 +12,14 @@ from backend.agent.memory import make_remember
 from backend.agent.nodes.assess import make_assess_result
 from backend.agent.nodes.schema import make_inspect_schema
 from backend.agent.nodes.sql import make_execute_query
-from backend.agent.nodes.terminal import make_partial_answer
+from backend.agent.nodes.terminal import partial_answer
 from backend.agent.nodes.tools import make_calculate_statistic, make_create_plot
 from backend.agent.routing import (
     after_agent,
     after_chart,
     after_inspection,
     after_sql,
-    after_tool,
+    after_statistics,
 )
 from backend.agent.state import LlmCall, QueryState, SqlRunner
 from backend.agent.telemetry import logged_node, reset_usage
@@ -45,9 +45,11 @@ def begin_turn(_state: QueryState) -> QueryState:
         "chart": "",
         "error": "",
         "final_answer": "",
+        "incomplete": False,
         "sql": "",
         "sql_tries": 0,
         "chart_tries": 0,
+        "statistics_tries": 0,
         "steps": 0,
         "started_at": time.time(),
     }
@@ -58,8 +60,6 @@ def _production_schema_runner(question, state):
     artifacts = owned_artifacts(state.get("owner_id", ""))
     discovered["artifacts"] = artifacts
     return discovered
-
-
 
 def _state_artifact_relations(state: QueryState) -> set[str]:
     now = datetime.now(timezone.utc)
@@ -102,11 +102,12 @@ def build_query_graph(
     schema_runner=None,
     sql_analyzer=None,
 ):
-    custom_sql_runner = sql_runner is not None
-    if custom_sql_runner:
+    if sql_runner is not None:
         original_runner = sql_runner
         sql_runner = lambda query, _state: original_runner(query)
-        schema_runner = schema_runner or (lambda _question, _state: {"context": "", "allowed_tables": []})
+        schema_runner = schema_runner or (
+            lambda _question, _state: {"context": "", "allowed_tables": []}
+        )
         sql_analyzer = sql_analyzer or (
             lambda query, _state: {"status": "safe", **analyze_sql(query)}
         )
@@ -119,13 +120,17 @@ def build_query_graph(
     remember = make_remember(llm_call)
 
     graph = StateGraph(QueryState)
-    graph.add_node("begin", logged_node("begin", begin_turn))
-    graph.add_node("inspect_schema", logged_node("inspect_schema", make_inspect_schema(schema_runner)))
-    graph.add_node("agent", logged_node("agent", make_assess_result(llm_call, remember)))
-    graph.add_node("sql", logged_node("sql", make_execute_query(sql_runner, sql_analyzer)))
-    graph.add_node("statistics", logged_node("statistics", make_calculate_statistic(statistics_runner)))
-    graph.add_node("chart", logged_node("chart", make_create_plot(chart_runner, remember)))
-    graph.add_node("partial", logged_node("partial", make_partial_answer()))
+    nodes = {
+        "begin": begin_turn,
+        "inspect_schema": make_inspect_schema(schema_runner),
+        "agent": make_assess_result(llm_call, remember),
+        "sql": make_execute_query(sql_runner, sql_analyzer),
+        "statistics": make_calculate_statistic(statistics_runner),
+        "chart": make_create_plot(chart_runner, remember),
+        "partial": partial_answer,
+    }
+    for name, node in nodes.items():
+        graph.add_node(name, logged_node(name, node))
 
     graph.add_edge(START, "begin")
     graph.add_edge("begin", "inspect_schema")
@@ -144,7 +149,9 @@ def build_query_graph(
         },
     )
     graph.add_conditional_edges("sql", after_sql, {"agent": "agent", "partial": "partial"})
-    graph.add_conditional_edges("statistics", after_tool, {"agent": "agent", "partial": "partial"})
+    graph.add_conditional_edges(
+        "statistics", after_statistics, {"agent": "agent", "partial": "partial"}
+    )
     graph.add_conditional_edges(
         "chart", after_chart, {"done": END, "agent": "agent", "partial": "partial"}
     )

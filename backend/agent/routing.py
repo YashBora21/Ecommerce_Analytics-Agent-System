@@ -5,6 +5,7 @@ from backend.agent.state import (
     MAX_CHART_TRIES,
     MAX_RUN_SECONDS,
     MAX_SQL_TRIES,
+    MAX_STATISTICS_TRIES,
     MAX_TOTAL_TOKENS,
     QueryState,
 )
@@ -46,13 +47,17 @@ def after_sql(state: QueryState) -> str:
     return "partial"
 
 
-def after_tool(state: QueryState) -> str:
-    return "partial" if state.get("error") or budget_exhausted(state) else "agent"
+def after_statistics(state: QueryState) -> str:
+    if not state.get("error"):
+        return "agent"
+    if state.get("statistics_tries", 0) >= MAX_STATISTICS_TRIES or budget_exhausted(state):
+        return "partial"
+    return "agent"
 
 
 def after_chart(state: QueryState) -> str:
     if not state.get("error"):
         return "done"
-    if state.get("chart_tries", 0) >= MAX_CHART_TRIES:
+    if state.get("chart_tries", 0) >= MAX_CHART_TRIES or budget_exhausted(state):
         return "partial"
     return "agent"

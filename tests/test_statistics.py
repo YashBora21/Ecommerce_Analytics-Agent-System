@@ -16,6 +16,10 @@ class StatisticsTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["value"], 30.0)
 
+    def test_percentile_accepts_quantile_notation(self) -> None:
+        result = calculate_statistics(CSV_DATA, "percentile", "revenue", percentile=0.9)
+        self.assertEqual(result["value"], 36.0)
+
     def test_correlation_uses_matching_columns(self) -> None:
         result = calculate_statistics(CSV_DATA, "correlation", "revenue", "orders")
         self.assertTrue(result["ok"])
@@ -40,6 +44,48 @@ class StatisticsTests(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "Statistics require complete SQL results")
+
+    def test_artifact_correlation_runs_inside_postgres_with_owner_check(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        artifact = {
+            "relation_name": "result_owned",
+            "columns": [{"name": "payment"}, {"name": "score"}],
+            "has_limit": False,
+        }
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = {
+            "value": 0.125,
+            "count": 96_477,
+        }
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with patch(
+            "backend.tools.artifacts.owned_artifact",
+            return_value=artifact,
+        ) as owned, patch(
+            "backend.db.postgres.postgres_connection",
+            return_value=context,
+        ):
+            result = calculate_statistics(
+                operation="correlation",
+                column="payment",
+                second_column="score",
+                artifact_id="artifact-1",
+                owner_id="thread-1",
+                database_url="postgresql://test",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["value"], 0.125)
+        self.assertEqual(result["count"], 96_477)
+        owned.assert_called_once_with(
+            "artifact-1",
+            "thread-1",
+            "postgresql://test",
+        )
+
     def test_langchain_tool_returns_actual_result(self) -> None:
         output = run_statistics.invoke(
             {"csv_data": CSV_DATA, "operation": "max", "column": "revenue"}
@@ -49,5 +95,3 @@ class StatisticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

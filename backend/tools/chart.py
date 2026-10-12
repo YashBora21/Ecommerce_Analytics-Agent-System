@@ -1,5 +1,6 @@
-﻿import csv
+import csv
 import io
+import os
 
 import plotly.graph_objects as go
 from langchain_core.tools import tool
@@ -70,23 +71,72 @@ def _treemap(rows, path_columns, value_column):
 
 
 def create_chart(
-    csv_data: str,
-    chart_type: str,
+    csv_data: str = "",
+    chart_type: str = "",
     x_column: str = "",
     y_column: str = "",
     title: str = "",
     value_column: str = "",
     path_columns: list[str] | None = None,
+    artifact_id: str = "",
+    owner_id: str = "",
+    database_url: str | None = None,
 ) -> str:
-    """Create Plotly JSON from complete CSV-formatted SQL results."""
-    if "[Results truncated]" in csv_data:
-        raise ValueError("Charts require complete SQL results")
-
+    """Create Plotly JSON from complete SQL results or artifact."""
     chart_type = chart_type.lower().strip()
     if chart_type not in SUPPORTED_CHARTS:
         raise ValueError(f"Unsupported chart type: {chart_type}")
 
-    rows = list(csv.DictReader(io.StringIO(csv_data)))
+    if artifact_id:
+        db_url = database_url or os.getenv("DATABASE_URL")
+        if not db_url:
+            raise ValueError("DATABASE_URL is required to read artifact")
+        from backend.db.postgres import postgres_connection
+        from backend.tools.artifacts import owned_artifact
+        from psycopg import sql
+
+        artifact = owned_artifact(artifact_id, owner_id, db_url)
+        column_names = {item["name"] for item in artifact["columns"]}
+        needed = list(dict.fromkeys(
+            column for column in (
+                x_column,
+                y_column,
+                value_column,
+                *(path_columns or []),
+            )
+            if column
+        ))
+        for column in needed:
+            if column not in column_names:
+                raise ValueError(f"Column not found: {column}")
+        row_limit = {
+            "heatmap": MAX_HEATMAP_CELLS,
+            "treemap": MAX_TREEMAP_LEAVES,
+        }.get(chart_type, MAX_CHART_POINTS)
+        relation = sql.SQL("{}.{}").format(
+            sql.Identifier("agent_results"),
+            sql.Identifier(artifact["relation_name"]),
+        )
+        query = sql.SQL("SELECT {} FROM {} LIMIT %s").format(
+            sql.SQL(", ").join(sql.Identifier(column) for column in needed),
+            relation,
+        )
+        with postgres_connection(db_url) as connection:
+            database_rows = connection.execute(query, (row_limit + 1,)).fetchall()
+        if len(database_rows) > row_limit:
+            raise ValueError(f"Chart exceeds {row_limit} rows; aggregate the artifact first")
+        rows = [
+            {
+                column: str(row[column]) if row[column] is not None else ""
+                for column in needed
+            }
+            for row in database_rows
+        ]
+    else:
+        if "[Results truncated]" in csv_data:
+            raise ValueError("Charts require complete SQL results")
+        rows = list(csv.DictReader(io.StringIO(csv_data)))
+
     if not rows:
         raise ValueError("Chart requires at least one result row")
 
@@ -118,25 +168,30 @@ def create_chart(
 
 @tool
 def run_chart(
-    csv_data: str,
-    chart_type: str,
+    csv_data: str = "",
+    chart_type: str = "",
     x_column: str = "",
     y_column: str = "",
     title: str = "",
     value_column: str = "",
     path_columns: list[str] | None = None,
+    artifact_id: str = "",
+    owner_id: str = "",
+    database_url: str | None = None,
 ) -> str:
-    """Create a supported Plotly chart from actual SQL query results."""
+    """Create a supported Plotly chart from actual SQL query results or an artifact."""
     try:
         return create_chart(
-            csv_data,
-            chart_type,
-            x_column,
-            y_column,
-            title,
-            value_column,
-            path_columns,
+            csv_data=csv_data,
+            chart_type=chart_type,
+            x_column=x_column,
+            y_column=y_column,
+            title=title,
+            value_column=value_column,
+            path_columns=path_columns,
+            artifact_id=artifact_id,
+            owner_id=owner_id,
+            database_url=database_url,
         )
     except (ValueError, csv.Error) as error:
         return f"Rejected: {error}"
-

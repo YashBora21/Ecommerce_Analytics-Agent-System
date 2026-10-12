@@ -6,7 +6,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-
 from backend.db.postgres import postgres_connection
 from backend.agent.telemetry import (
     get_usage,
@@ -76,27 +75,24 @@ class RunStore:
 
     def update(self, run_id: str, **changes) -> None:
         if self.database_url:
-            columns = {
-                "status": changes.get("status"),
-                "result_json": json.dumps(changes["result"], default=str) if "result" in changes else None,
-                "usage_json": json.dumps(changes["usage"], default=str) if "usage" in changes else None,
-                "error": changes.get("error"),
-                "cancel_requested": changes.get("cancel_requested"),
+            updates = {
+                key: changes[key]
+                for key in ("status", "error", "cancel_requested")
+                if key in changes
             }
-            assignments = []
-            values = []
-            for column, value in columns.items():
-                if column.replace("_json", "") in changes or column in changes:
-                    assignments.append(f"{column} = %s")
-                    values.append(value)
-            if not assignments:
+            if "result" in changes:
+                updates["result_json"] = json.dumps(changes["result"], default=str)
+            if "usage" in changes:
+                updates["usage_json"] = json.dumps(changes["usage"], default=str)
+            if not updates:
                 return
-            values.append(run_id)
+
+            assignments = ", ".join(f"{column} = %s" for column in updates)
             with postgres_connection(self.database_url) as connection:
                 connection.execute(
-                    f"UPDATE agent_results.query_runs SET {', '.join(assignments)}, "
+                    f"UPDATE agent_results.query_runs SET {assignments}, "
                     "updated_at = now() WHERE run_id = %s",
-                    values,
+                    [*updates.values(), run_id],
                 )
         else:
             with self.lock:
@@ -183,9 +179,11 @@ class RunManager:
         try:
             result = agent(question, thread_id=thread_id)
             usage = get_usage()
-            self.store.update(run_id, status="completed", result=result, usage=usage)
+            status = "incomplete" if result.get("incomplete") else "completed"
+            self.store.update(run_id, status=status, result=result, usage=usage)
             logger.info(
-                "event=run_completed run_id=%s thread_id=%s usage=%s",
+                "event=run_%s run_id=%s thread_id=%s usage=%s",
+                status,
                 run_id,
                 thread_id,
                 usage,
@@ -216,7 +214,7 @@ class RunManager:
 
     def cancel(self, run_id: str) -> bool:
         record = self.store.get(run_id)
-        if not record or record["status"] in {"completed", "failed", "cancelled"}:
+        if not record or record["status"] in {"completed", "incomplete", "failed", "cancelled"}:
             return False
         self.store.update(run_id, cancel_requested=True)
         with self.lock:

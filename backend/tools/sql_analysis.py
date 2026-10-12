@@ -1,14 +1,12 @@
 import hashlib
-import json
 import os
-from pathlib import Path
+import re
 from typing import Any
 
 import psycopg
 from psycopg.rows import tuple_row
 from sqlglot import exp, parse
 from sqlglot.errors import ParseError
-from sqlglot.optimizer.scope import traverse_scope
 
 from backend.db.postgres import postgres_connection
 
@@ -35,13 +33,58 @@ def _table_name(table: exp.Table) -> str:
     return ".".join(parts)
 
 
+def _one_row_ctes(tree: exp.Expression) -> set[str]:
+    names = set()
+    for cte in tree.find_all(exp.CTE):
+        query = cte.this
+        if not isinstance(query, exp.Select):
+            continue
+        limit = query.args.get("limit")
+        limit_value = getattr(getattr(limit, "expression", None), "this", None)
+        has_small_limit = str(limit_value).isdigit() and int(limit_value) <= 1
+        scalar_aggregate = (
+            query.find(exp.AggFunc) is not None
+            and query.args.get("group") is None
+            and query.find(exp.Window) is None
+        )
+        if query.args.get("from_") is None or has_small_limit or scalar_aggregate:
+            names.add(cte.alias_or_name.lower())
+    return names
 
-def _predicate_depth(node: exp.Expression | None) -> int:
-    if node is None:
-        return 0
-    children = [child for child in node.iter_expressions()]
-    child_depth = max((_predicate_depth(child) for child in children), default=0)
-    return child_depth + (1 if isinstance(node, (exp.And, exp.Or, exp.Not)) else 0)
+
+def _has_unstable_limit_one(tree: exp.Expression) -> bool:
+    for select in tree.find_all(exp.Select):
+        limit = select.args.get("limit")
+        limit_value = getattr(getattr(limit, "expression", None), "this", None)
+        if str(limit_value) != "1":
+            continue
+        order = select.args.get("order")
+        if not order or len(order.expressions) < 2:
+            return True
+    return False
+
+
+def _repair_invalid_alias(sql: str, error: psycopg.Error) -> str | None:
+    message = getattr(getattr(error, "diag", None), "message_primary", "") or str(error)
+    match = re.search(r'syntax error at or near "([^"]+)"', message, re.IGNORECASE)
+    if not match:
+        return None
+    invalid_alias = match.group(1).lower()
+    statements = [statement for statement in parse(sql, read="postgres") if statement]
+    if len(statements) != 1:
+        return None
+    tree = statements[0]
+    repaired = False
+    for alias in tree.find_all(exp.TableAlias):
+        if alias.name.lower() == invalid_alias:
+            alias.set("this", exp.to_identifier(alias.name, quoted=True))
+            repaired = True
+    if not repaired:
+        return None
+    for column in tree.find_all(exp.Column):
+        if column.table.lower() == invalid_alias:
+            column.set("table", exp.to_identifier(column.table, quoted=True))
+    return tree.sql(dialect="postgres", pretty=False)
 
 
 def validate_sql(
@@ -53,8 +96,6 @@ def validate_sql(
         raise ValueError("SQL must be a non-empty string")
     if "\x00" in sql:
         raise ValueError("SQL cannot contain null bytes")
-    if "--" in sql or "/*" in sql or "*/" in sql:
-        raise ValueError("SQL comments are not allowed")
     try:
         statements = [statement for statement in parse(sql, read="postgres") if statement]
     except ParseError as error:
@@ -64,7 +105,15 @@ def validate_sql(
     tree = statements[0]
     if not isinstance(tree, exp.Query):
         raise ValueError("Only SELECT queries are allowed")
-    blocked_nodes = (exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop, exp.Command)
+    blocked_nodes = (
+        exp.Insert,
+        exp.Update,
+        exp.Delete,
+        exp.Merge,
+        exp.Create,
+        exp.Drop,
+        exp.Command,
+    )
     if any(tree.find(node_type) for node_type in blocked_nodes) or tree.find(exp.Into):
         raise ValueError("Only SELECT queries are allowed")
     if tree.find(exp.Lock):
@@ -90,84 +139,37 @@ def validate_sql(
         tables.append(name)
 
     joins = list(tree.find_all(exp.Join))
+    one_row_ctes = _one_row_ctes(tree)
+    risky_cross_join = False
     for join in joins:
-        if str(join.args.get("kind", "")).upper() == "CROSS":
-            raise ValueError("CROSS JOIN is not allowed")
+        is_cross = str(join.args.get("kind", "")).upper() == "CROSS"
+        joined_name = join.this.name.lower() if isinstance(join.this, exp.Table) else ""
+        joins_one_row_cte = joined_name in one_row_ctes
+        if is_cross:
+            risky_cross_join = risky_cross_join or not joins_one_row_cte
+            continue
         if not join.args.get("on") and not join.args.get("using"):
+            if joins_one_row_cte:
+                continue
             raise ValueError("Every JOIN requires an ON or USING condition")
+        on_clause = join.args.get("on")
+        if on_clause is not None and not any(on_clause.find_all(exp.Column)):
+            raise ValueError("JOIN conditions must compare columns")
 
-    functions = set()
     for function in tree.find_all(exp.Func):
         name = function.name.lower() if function.name else function.sql_name().lower()
-        functions.add(name)
         if name in BLOCKED_FUNCTIONS:
             raise ValueError(f"Function is not allowed: {name}")
 
     canonical = tree.sql(dialect="postgres", pretty=False, normalize=True)
-    with_clause = tree.args.get("with_")
-    metrics = {
-        "tables": len(set(tables)),
-        "joins": len(joins),
-        "subqueries": sum(1 for _ in tree.find_all(exp.Subquery)),
-        "correlated_subqueries": sum(
-            1 for scope in traverse_scope(tree) if scope.is_correlated_subquery
-        ),
-        "ctes": sum(1 for _ in tree.find_all(exp.CTE)),
-        "recursive": bool(with_clause and with_clause.args.get("recursive")),
-        "windows": sum(1 for _ in tree.find_all(exp.Window)),
-        "aggregates": sum(1 for _ in tree.find_all(exp.AggFunc)),
-        "set_operations": sum(1 for _ in tree.find_all(exp.SetOperation)),
-        "predicates": sum(1 for _ in tree.find_all(exp.Predicate)),
-        "predicate_depth": _predicate_depth(tree.args.get("where")),
-    }
-    score = (
-        metrics["tables"]
-        + 3 * metrics["joins"]
-        + 3 * metrics["subqueries"]
-        + 4 * metrics["correlated_subqueries"]
-        + 2 * metrics["ctes"]
-        + 5 * int(metrics["recursive"])
-        + 2 * metrics["windows"]
-        + metrics["aggregates"]
-        + 3 * metrics["set_operations"]
-        + metrics["predicates"] // 3
-        + metrics["predicate_depth"]
-    )
+    has_limit = tree.args.get("limit") is not None
     return {
         "canonical_sql": canonical,
         "sql_hash": hashlib.sha256(canonical.encode()).hexdigest(),
         "tables": sorted(set(tables)),
-        "functions": sorted(functions),
-        "structural": metrics,
-        "structural_score": score,
-    }
-
-
-def _walk_plan(node: dict[str, Any], depth: int = 1) -> dict[str, Any]:
-    children = node.get("Plans", [])
-    child_metrics = [_walk_plan(child, depth + 1) for child in children]
-    child_rows = [max(int(child.get("Plan Rows", 0)), 1) for child in children]
-    multiplier = (
-        float(node.get("Plan Rows", 0)) / max(child_rows)
-        if len(child_rows) > 1
-        else 1.0
-    )
-    node_type = node.get("Node Type", "")
-    return {
-        "depth": max([depth, *(item["depth"] for item in child_metrics)]),
-        "sequential_scans": (1 if node_type == "Seq Scan" else 0)
-        + sum(item["sequential_scans"] for item in child_metrics),
-        "nested_loops": (1 if node_type == "Nested Loop" else 0)
-        + sum(item["nested_loops"] for item in child_metrics),
-        "joins": (1 if "Join" in node_type or node_type == "Nested Loop" else 0)
-        + sum(item["joins"] for item in child_metrics),
-        "sorts": (1 if node_type in {"Sort", "Incremental Sort"} else 0)
-        + sum(item["sorts"] for item in child_metrics),
-        "aggregations": (1 if node_type in {"Aggregate", "GroupAggregate", "HashAggregate"} else 0)
-        + sum(item["aggregations"] for item in child_metrics),
-        "max_join_multiplier": max(
-            [multiplier, *(item["max_join_multiplier"] for item in child_metrics)]
-        ),
+        "has_limit": has_limit,
+        "risky_cross_join": risky_cross_join,
+        "unstable_limit_one": _has_unstable_limit_one(tree),
     }
 
 
@@ -175,18 +177,18 @@ def explain_postgres(sql: str, database_url: str, timeout: float = 5.0) -> dict[
     with postgres_connection(database_url) as connection:
         with connection.cursor(row_factory=tuple_row) as cursor:
             cursor.execute("SET TRANSACTION READ ONLY")
-            cursor.execute("SELECT set_config('statement_timeout', %s, true)", (str(int(timeout * 1000)),))
+            cursor.execute(
+                "SELECT set_config('statement_timeout', %s, true)",
+                (str(int(timeout * 1000)),),
+            )
             cursor.execute(f"EXPLAIN (FORMAT JSON) {sql}")
             root = cursor.fetchone()[0][0]["Plan"]
-    operations = _walk_plan(root)
     plan_rows = int(root.get("Plan Rows", 0))
     plan_width = int(root.get("Plan Width", 0))
     return {
         "total_cost": float(root.get("Total Cost", 0)),
         "plan_rows": plan_rows,
-        "plan_width": plan_width,
         "estimated_bytes": plan_rows * plan_width,
-        **operations,
     }
 
 
@@ -198,12 +200,39 @@ def analyze_sql(
 ) -> dict[str, Any]:
     try:
         analysis = validate_sql(sql, allowed_tables, allowed_artifacts)
-        planner = explain_postgres(sql, database_url) if database_url else {}
+        if analysis["unstable_limit_one"]:
+            return {
+                "status": "needs_revision",
+                "reasons": [
+                    "LIMIT 1 has no deterministic tie handling. Return all ties, "
+                    "or order by the metric, supporting sample count, and a stable identifier."
+                ],
+                "planner": {},
+                "executable_sql": sql,
+                **analysis,
+            }
+        executable_sql = sql
+        try:
+            planner = explain_postgres(executable_sql, database_url) if database_url else {}
+        except psycopg.Error as error:
+            repaired_sql = _repair_invalid_alias(executable_sql, error)
+            if not repaired_sql:
+                raise
+            analysis = validate_sql(repaired_sql, allowed_tables, allowed_artifacts)
+            planner = explain_postgres(repaired_sql, database_url)
+            executable_sql = repaired_sql
         reasons = []
+        if analysis["risky_cross_join"]:
+            reasons.append("cross join requires decomposition or an explicit join key")
         if planner.get("total_cost", 0) > DEFAULT_MAX_PLAN_COST:
-            reasons.append(f"estimated cost {planner['total_cost']:.0f} exceeds {DEFAULT_MAX_PLAN_COST:.0f}")
+            reasons.append(
+                f"estimated cost {planner['total_cost']:.0f} "
+                f"exceeds {DEFAULT_MAX_PLAN_COST:.0f}"
+            )
         if planner.get("plan_rows", 0) > DEFAULT_MAX_PLAN_ROWS:
-            reasons.append(f"estimated rows {planner['plan_rows']} exceed {DEFAULT_MAX_PLAN_ROWS}")
+            reasons.append(
+                f"estimated rows {planner['plan_rows']} exceed {DEFAULT_MAX_PLAN_ROWS}"
+            )
         if planner.get("estimated_bytes", 0) > DEFAULT_MAX_PLAN_BYTES:
             reasons.append(
                 f"estimated bytes {planner['estimated_bytes']} exceed {DEFAULT_MAX_PLAN_BYTES}"
@@ -212,6 +241,7 @@ def analyze_sql(
             "status": "needs_decomposition" if reasons else "safe",
             "reasons": reasons,
             "planner": planner,
+            "executable_sql": executable_sql,
             **analysis,
         }
     except ValueError as error:
@@ -220,7 +250,6 @@ def analyze_sql(
             "Only SELECT",
             "not allowed",
             "not owned",
-            "CROSS JOIN",
             "requires an ON",
             "Row-locking",
         )

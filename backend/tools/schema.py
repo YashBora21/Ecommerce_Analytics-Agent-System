@@ -1,13 +1,10 @@
 import os
 import re
-import sqlite3
 import time
-from pathlib import Path
 from typing import Any
 
 
 from backend.db.postgres import postgres_connection
-from backend.tools.sql_core import DB_FILE
 
 
 _CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -80,51 +77,20 @@ def _postgres_catalog(database_url: str) -> dict[str, Any]:
     return {"dialect": "postgres", "tables": tables}
 
 
-def _sqlite_catalog(path: Path) -> dict[str, Any]:
-    connection = sqlite3.connect(path)
-    try:
-        names = [
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
-                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
-            )
-        ]
-        tables = {}
-        for table_name in names:
-            escaped = table_name.replace('"', '""')
-            columns = [
-                {"name": row[1], "type": row[2] or "unknown", "nullable": not bool(row[3])}
-                for row in connection.execute(f'PRAGMA table_info("{escaped}")')
-            ]
-            foreign_keys = [
-                {"column": row[3], "target": f"{row[2]}.{row[4]}"}
-                for row in connection.execute(f'PRAGMA foreign_key_list("{escaped}")')
-            ]
-            tables[table_name] = {
-                "schema": "main",
-                "table": table_name,
-                "columns": columns,
-                "foreign_keys": foreign_keys,
-            }
-        return {"dialect": "sqlite", "tables": tables}
-    finally:
-        connection.close()
-
-
-def load_catalog(path: Path | None = None, refresh: bool = False) -> dict[str, Any]:
-    database_url = os.getenv("DATABASE_URL") if path is None else None
-    key = database_url or str((path or DB_FILE).resolve())
-    cached = _CACHE.get(key)
+def load_catalog(refresh: bool = False) -> dict[str, Any]:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not set")
+    cached = _CACHE.get(database_url)
     if cached and not refresh and time.monotonic() - cached[0] < CACHE_SECONDS:
         return cached[1]
-    catalog = _postgres_catalog(database_url) if database_url else _sqlite_catalog(path or DB_FILE)
-    _CACHE[key] = (time.monotonic(), catalog)
+    catalog = _postgres_catalog(database_url)
+    _CACHE[database_url] = (time.monotonic(), catalog)
     return catalog
 
 
-def discover_schema(question: str, path: Path | None = None, refresh: bool = False) -> dict[str, Any]:
-    catalog = load_catalog(path, refresh)
+def discover_schema(question: str, refresh: bool = False) -> dict[str, Any]:
+    catalog = load_catalog(refresh)
     question_tokens = _tokens(question)
     scored = []
     for name, table in catalog["tables"].items():

@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -17,6 +17,7 @@ from backend.db.postgres import close_pools
 from backend.agent.state import QueryState
 from backend.agent.telemetry import logger
 from backend.jobs import run_manager
+from backend.tools.artifacts import artifact_csv
 from backend.tools.sql_core import execute_sql
 
 
@@ -57,7 +58,7 @@ class QueryResponse(BaseModel):
     run_id: str
     chart: dict | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
-    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list["ArtifactResponse"] = Field(default_factory=list)
     usage: TokenUsage
 
 
@@ -68,19 +69,45 @@ class QueryAccepted(BaseModel):
     poll_url: str
 
 
+class ArtifactResponse(BaseModel):
+    row_count: int
+    columns: list[str]
+    expires_at: str
+    download_url: str
+
+
 def get_agent():
     return ask
 
 
 def _completed_response(result: QueryState, thread_id: str, run_id: str, usage: dict) -> QueryResponse:
     chart = json.loads(result["chart"]) if result.get("chart") else None
+    current_artifact_ids = {
+        item.get("artifact_id")
+        for item in result.get("evidence", [])
+        if item.get("artifact_id")
+    }
+    artifacts = [
+        ArtifactResponse(
+            row_count=item["row_count"],
+            columns=[
+                column["name"] if isinstance(column, dict) else str(column)
+                for column in item.get("columns", [])
+            ],
+            expires_at=item["expires_at"],
+            download_url=f"/api/artifacts/{item['artifact_id']}?thread_id={thread_id}",
+        )
+        for item in result.get("artifacts", [])
+        if item.get("complete") and item.get("artifact_id") in current_artifact_ids
+    ]
     return QueryResponse(
+        status="incomplete" if result.get("incomplete") else "completed",
         answer=result["final_answer"],
         thread_id=thread_id,
         run_id=run_id,
         chart=chart,
         evidence=result.get("evidence", []),
-        artifacts=result.get("artifacts", []),
+        artifacts=artifacts,
         usage=TokenUsage(**usage),
     )
 
@@ -123,7 +150,7 @@ def run_status(run_id: str):
     record = run_manager.store.get(run_id)
     if not record:
         raise HTTPException(status_code=404, detail="Run not found")
-    if record["status"] == "completed":
+    if record["status"] in {"completed", "incomplete"}:
         return _completed_response(
             record["result"],
             record["thread_id"],
@@ -145,6 +172,21 @@ def cancel_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Run not found")
     accepted = run_manager.cancel(run_id)
     return {"run_id": run_id, "cancel_requested": accepted}
+
+
+@app.get("/api/artifacts/{artifact_id}")
+def download_artifact(artifact_id: str, thread_id: str):
+    try:
+        rows = artifact_csv(artifact_id, thread_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return StreamingResponse(
+        rows,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="artifact-{artifact_id}.csv"'
+        },
+    )
 
 
 frontend_dir = Path(__file__).resolve().parents[1] / "frontend"

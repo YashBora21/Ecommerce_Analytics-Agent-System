@@ -119,6 +119,47 @@ class ChartTests(unittest.TestCase):
 
         self.assertEqual(output, "Rejected: Charts require complete SQL results")
 
+    def test_artifact_chart_fetch_is_bounded_and_owner_checked(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        artifact = {
+            "relation_name": "result_owned",
+            "columns": [{"name": "state"}, {"name": "revenue"}],
+        }
+        connection = MagicMock()
+        connection.execute.return_value.fetchall.return_value = [
+            {"state": f"S{number}", "revenue": number}
+            for number in range(101)
+        ]
+        context = MagicMock()
+        context.__enter__.return_value = connection
+
+        with patch(
+            "backend.tools.artifacts.owned_artifact",
+            return_value=artifact,
+        ) as owned, patch(
+            "backend.db.postgres.postgres_connection",
+            return_value=context,
+        ):
+            output = run_chart.invoke({
+                "chart_type": "bar",
+                "x_column": "state",
+                "y_column": "revenue",
+                "artifact_id": "artifact-1",
+                "owner_id": "thread-1",
+                "database_url": "postgresql://test",
+            })
+
+        self.assertEqual(
+            output,
+            "Rejected: Chart exceeds 100 rows; aggregate the artifact first",
+        )
+        owned.assert_called_once_with(
+            "artifact-1",
+            "thread-1",
+            "postgresql://test",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

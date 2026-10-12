@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 from backend.agent.prompt import MEMORY_SUMMARY_PROMPT
 from backend.agent.state import LlmCall, MAX_RECENT_MESSAGES, QueryState
@@ -35,17 +36,19 @@ def sql_result(
 
 
 def recent_context(state: QueryState) -> str:
-    parts = []
+    parts = [
+        "Conversation memory is context, not evidence. Use it only to resolve an "
+        "explicit follow-up; never carry old filters into a self-contained question."
+    ]
     if state.get("history_summary"):
         parts.append(f"Earlier summary: {state['history_summary']}")
-    if state.get("last_sql"):
-        parts.append(f"Last successful SQL: {state['last_sql']}")
     artifacts = [
         {
             "artifact_id": item.get("artifact_id"),
             "relation": item.get("relation"),
             "row_count": item.get("row_count"),
             "columns": item.get("columns"),
+            "has_limit": bool(item.get("has_limit", False)),
             "expires_at": item.get("expires_at"),
         }
         for item in state.get("artifacts", [])
@@ -60,6 +63,18 @@ def recent_context(state: QueryState) -> str:
         )
         parts.append(f"Recent messages:\n{messages}")
     return "\n\n".join(parts)
+
+
+def asks_to_recall_previous_result(question: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(previous|earlier|last)\s+(answer|result|response|query)\b|"
+            r"\b(that|those)\s+(answer|result|response|query|results)\b|"
+            r"\bwhat\s+was\s+(it|that)\b",
+            question,
+            re.IGNORECASE,
+        )
+    )
 
 
 def make_remember(llm_call: LlmCall):

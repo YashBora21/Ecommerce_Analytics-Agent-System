@@ -65,7 +65,7 @@ class QueryGraphTests(unittest.TestCase):
 
     def test_agent_can_calculate_statistics(self) -> None:
         llm = ScriptedLlm(
-            action("query_sql", sql="SELECT revenue FROM orders LIMIT 3"),
+            action("query_sql", sql="SELECT revenue FROM orders"),
             action("calculate_statistics", operation="mean", column="revenue"),
             action("answer", final_answer="Average revenue is 20."),
         )
@@ -155,6 +155,19 @@ class QueryGraphTests(unittest.TestCase):
         ).invoke({"question": "Delete orders"})
         self.assertEqual(result["sql_tries"], MAX_SQL_TRIES)
         self.assertIn("could not run a safe", result["final_answer"].lower())
+
+    def test_sql_can_recover_on_the_third_retry(self) -> None:
+        llm = ScriptedLlm(
+            *[action("query_sql", sql="DROP TABLE orders") for _ in range(3)],
+            action("query_sql", sql="SELECT COUNT(*) AS orders FROM orders"),
+            action("answer", final_answer="There are 10 orders."),
+        )
+
+        result = build_query_graph(llm, lambda _sql: "orders\n10").invoke(
+            {"question": "Count orders"}
+        )
+
+        self.assertEqual(result["final_answer"], "There are 10 orders.")
 
     def test_step_limit_returns_incomplete_evidence(self) -> None:
         llm = ScriptedLlm(*[

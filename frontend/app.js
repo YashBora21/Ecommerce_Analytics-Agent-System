@@ -29,7 +29,7 @@ async function waitForRun(pollUrl) {
     const response = await fetch(`${API}${pollUrl}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "Could not check query status");
-    if (data.status === "completed") return data;
+    if (data.status === "completed" || data.status === "incomplete") return data;
     if (data.status === "failed") throw new Error(data.error || "Query failed");
     if (data.status === "cancelled") throw new Error("Query was cancelled");
   }
@@ -84,6 +84,17 @@ form.addEventListener("submit", async (event) => {
         chart.textContent = "Plotly could not load, so the chart is unavailable.";
       }
     }
+    if (data.artifacts?.length) {
+      const downloads = document.createElement("div");
+      downloads.className = "artifacts";
+      data.artifacts.forEach((artifact) => {
+        const link = document.createElement("a");
+        link.href = `${API}${artifact.download_url}`;
+        link.textContent = `Download complete CSV (${artifact.row_count.toLocaleString()} rows)`;
+        downloads.appendChild(link);
+      });
+      answer.appendChild(downloads);
+    }
   } catch (error) {
     pending.querySelector(".bubble").textContent = error.message;
     pending.classList.add("error");
@@ -102,4 +113,3 @@ document.querySelectorAll(".examples button").forEach((button) => {
 });
 
 checkHealth();
-

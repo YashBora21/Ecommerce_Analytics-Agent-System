@@ -1,16 +1,18 @@
-﻿import os
+import os
 
 from typing import Any, Callable, TypedDict
 
 
 Message = dict[str, str]
 Evidence = dict[str, Any]
-LlmCall = Callable[[list[Message]], str]
+LlmCall = Callable[..., str]
 SqlRunner = Callable[..., str]
 
-MAX_SQL_TRIES = 3
+MAX_SQL_RETRIES = 3
+MAX_SQL_TRIES = MAX_SQL_RETRIES + 1
 MAX_AGENT_STEPS = 12
 MAX_CHART_TRIES = 2
+MAX_STATISTICS_TRIES = 2
 MAX_RECENT_MESSAGES = 6
 MAX_TOTAL_TOKENS = int(os.getenv("MAX_AGENT_TOKENS", "30000"))
 MAX_RUN_SECONDS = float(os.getenv("MAX_RUN_SECONDS", "300"))
@@ -28,9 +30,11 @@ class QueryState(TypedDict, total=False):
     chart: str
     error: str
     final_answer: str
+    incomplete: bool
     sql: str
     sql_tries: int
     chart_tries: int
+    statistics_tries: int
     steps: int
     started_at: float
     history: list[Message]
