@@ -112,7 +112,6 @@ class ApiTests(unittest.TestCase):
                     "columns": [{"name": "seller_id"}, {"name": "revenue"}],
                     "preview": [{"seller_id": "secret"}],
                     "profile": [{"column_name": "revenue"}],
-                    "complete": True,
                     "expires_at": "2030-01-01T00:00:00+00:00",
                 }],
             }
@@ -136,7 +135,6 @@ class ApiTests(unittest.TestCase):
                     "artifact_id": "00000000-0000-0000-0000-000000000001",
                     "row_count": 96477,
                     "columns": [{"name": "order_id"}],
-                    "complete": True,
                     "expires_at": "2030-01-01T00:00:00+00:00",
                 }],
             }

@@ -23,7 +23,7 @@ def _recover(error: Exception) -> str | None:
     try:
         data = json.loads(raw) if isinstance(raw, str) else raw
     except json.JSONDecodeError:
-        return None
+        return raw.strip() or None
     if not isinstance(data, dict):
         return None
     if isinstance(data.get("decision"), dict):

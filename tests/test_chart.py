@@ -107,6 +107,19 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(empty, "Rejected: Chart requires at least one result row")
         self.assertEqual(oversized, "Rejected: Pie chart exceeds 20 slices")
 
+        bar_rows = "state,revenue\n" + "\n".join(
+            f"S{number},{number}" for number in range(16)
+        )
+        oversized_bar = run_chart.invoke(
+            {
+                "csv_data": bar_rows,
+                "chart_type": "bar",
+                "x_column": "state",
+                "y_column": "revenue",
+            }
+        )
+        self.assertEqual(oversized_bar, "Rejected: Chart exceeds 15 points")
+
     def test_rejects_truncated_results(self) -> None:
         output = run_chart.invoke(
             {
@@ -129,7 +142,7 @@ class ChartTests(unittest.TestCase):
         connection = MagicMock()
         connection.execute.return_value.fetchall.return_value = [
             {"state": f"S{number}", "revenue": number}
-            for number in range(101)
+            for number in range(16)
         ]
         context = MagicMock()
         context.__enter__.return_value = connection
@@ -152,7 +165,7 @@ class ChartTests(unittest.TestCase):
 
         self.assertEqual(
             output,
-            "Rejected: Chart exceeds 100 rows; aggregate the artifact first",
+            "Rejected: Chart exceeds 15 rows; aggregate the artifact first",
         )
         owned.assert_called_once_with(
             "artifact-1",

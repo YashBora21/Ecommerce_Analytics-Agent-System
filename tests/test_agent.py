@@ -1,10 +1,11 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from langgraph.checkpoint.memory import MemorySaver
 
 from backend.agent.agent import MAX_AGENT_STEPS, MAX_SQL_TRIES, ask
-from backend.agent.graph import build_query_graph
+from backend.agent.graph import _production_schema_runner, build_query_graph
 from backend.agent.prompt import RESULT_ASSESSMENT_PROMPT
 
 
@@ -28,6 +29,28 @@ class ScriptedLlm:
 
 
 class QueryGraphTests(unittest.TestCase):
+    def test_follow_up_context_reaches_schema_selection(self) -> None:
+        captured = {}
+
+        def discover(question, llm_call):
+            captured["question"] = question
+            return {"tables": [], "allowed_tables": [], "context": ""}
+
+        state = {
+            "history": [
+                {"role": "assistant", "content": "Two categories are tied."},
+                {"role": "user", "content": "Return both categories."},
+            ],
+            "owner_id": "thread-1",
+        }
+        with patch("backend.agent.graph.discover_schema", side_effect=discover), patch(
+            "backend.agent.graph.owned_artifacts", return_value=[]
+        ):
+            _production_schema_runner("Go with the second option", state)
+
+        self.assertIn("Two categories are tied", captured["question"])
+        self.assertIn("Go with the second option", captured["question"])
+
     def test_question_reaches_grounded_answer(self) -> None:
         llm = ScriptedLlm(
             action("query_sql", sql="SELECT COUNT(*) AS orders FROM orders"),

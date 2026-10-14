@@ -98,7 +98,7 @@ def _completed_response(result: QueryState, thread_id: str, run_id: str, usage: 
             download_url=f"/api/artifacts/{item['artifact_id']}?thread_id={thread_id}",
         )
         for item in result.get("artifacts", [])
-        if item.get("complete") and item.get("artifact_id") in current_artifact_ids
+        if item.get("artifact_id") in current_artifact_ids
     ]
     return QueryResponse(
         status="incomplete" if result.get("incomplete") else "completed",

@@ -53,7 +53,7 @@ def make_execute_query(sql_runner: SqlRunner, sql_analyzer):
                 query,
                 tries,
                 analysis,
-                "SQL rejected: this query was already executed",
+                "SQL REJECTED:This Query is Alerady Executed",
             )
 
         result = sql_runner(query, {**state, "analysis": analysis})
@@ -78,7 +78,6 @@ def make_execute_query(sql_runner: SqlRunner, sql_analyzer):
                 "row_count": artifact["row_count"],
                 "byte_size": artifact.get("byte_size", 0),
                 "columns": artifact["columns"],
-                "complete": artifact.get("complete", True),
                 "has_limit": bool(artifact.get("has_limit", False)),
                 "expires_at": artifact["expires_at"],
                 "sql_hash": artifact.get("sql_hash", sql_hash),

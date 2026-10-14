@@ -149,6 +149,29 @@ class TelemetryTests(unittest.TestCase):
 
         self.assertIn('"calculate_statistics"', result)
 
+    def test_plain_failed_generation_reaches_the_validation_retry(self) -> None:
+        error = GroqError("Generated JSON does not match the expected schema")
+        error.body = {
+            "error": {
+                "failed_generation": "Please choose which tied category to continue with."
+            }
+        }
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: (_ for _ in ()).throw(error))
+            )
+        )
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test"}), patch(
+            "backend.agent.llm.Groq", return_value=client
+        ):
+            result = call_groq(
+                [{"role": "user", "content": "Resolve the tie"}],
+                structured_output=True,
+            )
+
+        self.assertEqual(result, "Please choose which tied category to continue with.")
+
     def test_rate_limit_is_retried_once(self) -> None:
         response = SimpleNamespace(
             usage=SimpleNamespace(prompt_tokens=8, completion_tokens=3),

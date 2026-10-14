@@ -8,7 +8,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from backend.agent.llm import call_groq
-from backend.agent.memory import make_remember
+from backend.agent.memory import make_remember, recent_context
 from backend.agent.nodes.assess import make_assess_result
 from backend.agent.nodes.schema import make_inspect_schema
 from backend.agent.nodes.sql import make_execute_query
@@ -22,7 +22,7 @@ from backend.agent.routing import (
     after_statistics,
 )
 from backend.agent.state import LlmCall, QueryState, SqlRunner
-from backend.agent.telemetry import logged_node, reset_usage
+from backend.agent.telemetry import logged_node, logger, reset_usage
 from backend.tools.artifacts import owned_artifacts
 from backend.tools.chart import run_chart
 from backend.tools.schema import discover_schema
@@ -56,7 +56,23 @@ def begin_turn(_state: QueryState) -> QueryState:
 
 
 def _production_schema_runner(question, state):
-    discovered = discover_schema(question)
+    def select_tables(prompt):
+        return call_groq(
+            [
+                {"role": "system", "content": "Select relevant database tables. Return JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=200,
+            reasoning_effort="low",
+        )
+
+    context = recent_context(state) if state.get("history") or state.get("history_summary") else ""
+    schema_question = f"{question}\n\nFollow-up context:\n{context}" if context else question
+    discovered = discover_schema(schema_question, llm_call=select_tables)
+    logger.info(
+        "event=schema_selected tables=%s",
+        [f"{table['schema']}.{table['table']}" for table in discovered["tables"]],
+    )
     artifacts = owned_artifacts(state.get("owner_id", ""))
     discovered["artifacts"] = artifacts
     return discovered
@@ -66,7 +82,7 @@ def _state_artifact_relations(state: QueryState) -> set[str]:
     relations = set()
     for artifact in state.get("artifacts", []):
         expires_at = artifact.get("expires_at")
-        if not artifact.get("complete") or not artifact.get("relation") or not expires_at:
+        if not artifact.get("relation") or not expires_at:
             continue
         if datetime.fromisoformat(expires_at) > now:
             relations.add(artifact["relation"].lower())
@@ -173,6 +189,7 @@ def _default_checkpointer():
         min_size=1,
         max_size=int(os.getenv("CHECKPOINT_POOL_SIZE", "5")),
         kwargs={"autocommit": True, "row_factory": dict_row},
+        check=ConnectionPool.check_connection,
     )
     saver = PostgresSaver(_checkpoint_pool)
     saver.setup()

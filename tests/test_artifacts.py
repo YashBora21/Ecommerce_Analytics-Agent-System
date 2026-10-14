@@ -14,8 +14,14 @@ class ArtifactTests(unittest.TestCase):
         migration = connection.execute.call_args_list[2].args[0]
         self.assertNotIn("source_sql text", create_table)
         self.assertNotIn("profile_json jsonb", create_table)
+        self.assertNotIn("sql_hash text", create_table)
+        self.assertNotIn("preview_json jsonb", create_table)
+        self.assertNotIn("complete boolean", create_table)
         self.assertIn("DROP COLUMN IF EXISTS source_sql", migration)
         self.assertIn("DROP COLUMN IF EXISTS profile_json", migration)
+        self.assertIn("DROP COLUMN IF EXISTS sql_hash", migration)
+        self.assertIn("DROP COLUMN IF EXISTS preview_json", migration)
+        self.assertIn("DROP COLUMN IF EXISTS complete", migration)
 
     def test_cleanup_reads_named_postgres_columns(self) -> None:
         connection = MagicMock()

@@ -1,3 +1,5 @@
+import json
+
 from groq import GroqError
 from pydantic import ValidationError
 
@@ -15,6 +17,20 @@ from backend.agent.telemetry import logger
 ASSESSMENT_TOKEN_LIMITS = (1600, 3200)
 
 
+def _include_statistics_count(state: QueryState, answer: str) -> str:
+    for item in reversed(state.get("evidence", [])):
+        if item.get("kind") != "statistics":
+            continue
+        try:
+            count = int(json.loads(item["result"])["count"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return answer
+        if str(count) not in answer and f"{count:,}" not in answer:
+            return f"{answer.rstrip()} Eligible rows used: {count:,}."
+        return answer
+    return answer
+
+
 def _artifact_context(state: QueryState) -> list[dict]:
     return [
         {
@@ -26,7 +42,6 @@ def _artifact_context(state: QueryState) -> list[dict]:
             "expires_at": item.get("expires_at"),
         }
         for item in state.get("artifacts", [])
-        if item.get("complete")
     ]
 
 
@@ -90,8 +105,13 @@ def make_assess_result(llm_call: LlmCall, remember):
                             "choose query_sql, clarify, or stop"
                         )
                     if action["name"] in {"answer", "clarify", "stop"}:
+                        answer = _include_statistics_count(
+                            state,
+                            action["args"]["final_answer"],
+                        )
+                        action["args"]["final_answer"] = answer
                         return {
-                            **remember(state, action["args"]["final_answer"]),
+                            **remember(state, answer),
                             "action": action,
                             "steps": steps,
                             "error": "",
@@ -105,6 +125,40 @@ def make_assess_result(llm_call: LlmCall, remember):
                         response[:300],
                     )
                     if attempt == len(ASSESSMENT_TOKEN_LIMITS):
+                        if state.get("evidence"):
+                            fallback_messages = [
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "Write only a concise final answer grounded in "
+                                        "the supplied completed evidence. Do not return JSON."
+                                    ),
+                                },
+                                {"role": "user", "content": prompt},
+                            ]
+                            try:
+                                try:
+                                    answer = llm_call(
+                                        fallback_messages,
+                                        max_tokens=1200,
+                                        reasoning_effort="low",
+                                    ).strip()
+                                except TypeError:
+                                    answer = llm_call(fallback_messages).strip()
+                                if answer:
+                                    answer = _include_statistics_count(state, answer)
+                                    action = {
+                                        "name": "answer",
+                                        "args": {"final_answer": answer},
+                                    }
+                                    return {
+                                        **remember(state, answer),
+                                        "action": action,
+                                        "steps": steps,
+                                        "error": "",
+                                    }
+                            except (RuntimeError, GroqError):
+                                pass
                         return {
                             "steps": steps,
                             "error": "The model returned an invalid action after correction.",

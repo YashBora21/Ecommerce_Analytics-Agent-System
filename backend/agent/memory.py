@@ -52,7 +52,6 @@ def recent_context(state: QueryState) -> str:
             "expires_at": item.get("expires_at"),
         }
         for item in state.get("artifacts", [])
-        if item.get("complete")
     ]
     if artifacts:
         parts.append(f"Available result artifacts: {artifacts}")

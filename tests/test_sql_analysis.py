@@ -58,6 +58,17 @@ class SqlAnalysisTests(unittest.TestCase):
         self.assertEqual(result["status"], "safe")
         self.assertFalse(result["risky_cross_join"])
 
+    def test_allows_scalar_date_cte_joined_on_true(self) -> None:
+        query = (
+            "WITH latest AS (SELECT MAX(order_date) AS max_date FROM orders) "
+            "SELECT COUNT(*) FROM orders o JOIN latest l ON TRUE "
+            "WHERE o.order_date >= date_trunc('month', l.max_date)"
+        )
+
+        result = analyze_sql(query, {"orders"})
+
+        self.assertEqual(result["status"], "safe")
+
     def test_repairs_a_server_rejected_table_alias(self) -> None:
         query = (
             "WITH delivered AS (SELECT order_id FROM orders) "
@@ -126,6 +137,22 @@ class SqlAnalysisTests(unittest.TestCase):
         self.assertIn("tie handling", unstable["reasons"][0])
         self.assertEqual(stable["status"], "safe")
         self.assertEqual(with_ties["status"], "safe")
+
+    def test_tie_error_names_every_unstable_cte(self) -> None:
+        result = analyze_sql(
+            "WITH top_state AS ("
+            "SELECT state, COUNT(*) AS order_count FROM orders "
+            "GROUP BY state ORDER BY order_count DESC LIMIT 1), "
+            "top_seller AS ("
+            "SELECT seller_id, SUM(total) AS revenue FROM orders "
+            "GROUP BY seller_id ORDER BY revenue DESC LIMIT 1) "
+            "SELECT * FROM top_state CROSS JOIN top_seller",
+            {"orders"},
+        )
+
+        self.assertEqual(result["status"], "needs_revision")
+        self.assertIn("top_state", result["reasons"][0])
+        self.assertIn("top_seller", result["reasons"][0])
 
     def test_returns_only_analysis_used_by_runtime(self) -> None:
         result = validate_sql(

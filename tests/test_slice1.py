@@ -122,7 +122,6 @@ class Slice1Tests(unittest.TestCase):
                     "row_count": 3,
                     "byte_size": 100,
                     "columns_json": [{"name": "revenue"}],
-                    "complete": True,
                     "has_limit": False,
                     "expires_at": expires,
                 }
@@ -154,7 +153,6 @@ class Slice1Tests(unittest.TestCase):
                     "row_count": 2,
                     "byte_size": 100,
                     "columns_json": [{"name": "seller_id"}, {"name": "revenue"}],
-                    "complete": True,
                     "has_limit": False,
                     "expires_at": expires,
                 }
@@ -248,6 +246,49 @@ class Slice1Tests(unittest.TestCase):
 
         self.assertEqual(result["final_answer"], "Completed after retry.")
         self.assertEqual(limits, [1600, 3200])
+
+    def test_uses_plain_answer_fallback_when_completed_evidence_has_invalid_json(self) -> None:
+        llm = ScriptedLlm("not json", "still not json", "Grounded final answer.")
+        node = make_assess_result(
+            llm,
+            lambda state, answer: {"final_answer": answer},
+        )
+
+        result = node(
+            {
+                "question": "Summarize the result",
+                "steps": 0,
+                "evidence": [{"kind": "sql", "sql": "SELECT 1", "result": "value\n1"}],
+                "artifacts": [],
+            }
+        )
+
+        self.assertEqual(result["final_answer"], "Grounded final answer.")
+        self.assertEqual(result["action"]["name"], "answer")
+
+    def test_statistical_answer_includes_tool_sample_count(self) -> None:
+        llm = ScriptedLlm(action("answer", final_answer="Correlation is -0.33."))
+        node = make_assess_result(
+            llm,
+            lambda state, answer: {"final_answer": answer},
+        )
+
+        result = node(
+            {
+                "question": "How strong is the relationship?",
+                "steps": 0,
+                "evidence": [
+                    {
+                        "kind": "statistics",
+                        "sql": "STATISTICS correlation(x)",
+                        "result": json.dumps({"count": 95824}),
+                    }
+                ],
+                "artifacts": [],
+            }
+        )
+
+        self.assertIn("Eligible rows used: 95,824.", result["final_answer"])
 
     def test_rejects_stale_answer_without_current_evidence(self) -> None:
         responses = iter([

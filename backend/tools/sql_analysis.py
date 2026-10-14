@@ -52,7 +52,8 @@ def _one_row_ctes(tree: exp.Expression) -> set[str]:
     return names
 
 
-def _has_unstable_limit_one(tree: exp.Expression) -> bool:
+def _unstable_limit_one_locations(tree: exp.Expression) -> list[str]:
+    locations = []
     for select in tree.find_all(exp.Select):
         limit = select.args.get("limit")
         limit_value = getattr(getattr(limit, "expression", None), "this", None)
@@ -60,8 +61,12 @@ def _has_unstable_limit_one(tree: exp.Expression) -> bool:
             continue
         order = select.args.get("order")
         if not order or len(order.expressions) < 2:
-            return True
-    return False
+            parent = select.parent
+            while parent and not isinstance(parent, (exp.CTE, exp.Subquery)):
+                parent = parent.parent
+            name = parent.alias_or_name if parent else "final SELECT"
+            locations.append(name or "unnamed subquery")
+    return locations
 
 
 def _repair_invalid_alias(sql: str, error: psycopg.Error) -> str | None:
@@ -153,7 +158,11 @@ def validate_sql(
                 continue
             raise ValueError("Every JOIN requires an ON or USING condition")
         on_clause = join.args.get("on")
-        if on_clause is not None and not any(on_clause.find_all(exp.Column)):
+        if (
+            on_clause is not None
+            and not joins_one_row_cte
+            and not any(on_clause.find_all(exp.Column))
+        ):
             raise ValueError("JOIN conditions must compare columns")
 
     for function in tree.find_all(exp.Func):
@@ -163,13 +172,15 @@ def validate_sql(
 
     canonical = tree.sql(dialect="postgres", pretty=False, normalize=True)
     has_limit = tree.args.get("limit") is not None
+    unstable_limits = _unstable_limit_one_locations(tree)
     return {
         "canonical_sql": canonical,
         "sql_hash": hashlib.sha256(canonical.encode()).hexdigest(),
         "tables": sorted(set(tables)),
         "has_limit": has_limit,
         "risky_cross_join": risky_cross_join,
-        "unstable_limit_one": _has_unstable_limit_one(tree),
+        "unstable_limit_one": bool(unstable_limits),
+        "unstable_limit_locations": unstable_limits,
     }
 
 
@@ -201,10 +212,12 @@ def analyze_sql(
     try:
         analysis = validate_sql(sql, allowed_tables, allowed_artifacts)
         if analysis["unstable_limit_one"]:
+            locations = ", ".join(analysis["unstable_limit_locations"])
             return {
                 "status": "needs_revision",
                 "reasons": [
-                    "LIMIT 1 has no deterministic tie handling. Return all ties, "
+                    f"LIMIT 1 has no deterministic tie handling in: {locations}. "
+                    "Fix every listed query block: return all ties with RANK/DENSE_RANK "
                     "or order by the metric, supporting sample count, and a stable identifier."
                 ],
                 "planner": {},

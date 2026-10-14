@@ -103,7 +103,6 @@ class AutonomousSafetyTests(unittest.TestCase):
             "columns": [{"name": "order_id", "type_oid": 25}],
             "preview": [{"order_id": "A"}],
             "profile": [],
-            "complete": True,
             "expires_at": "2030-01-01T00:00:00+00:00",
             "sql_hash": "hash",
         }
@@ -137,7 +136,6 @@ class AutonomousSafetyTests(unittest.TestCase):
             ],
             "preview": [],
             "profile": [],
-            "complete": True,
             "has_limit": False,
             "expires_at": "2030-01-01T00:00:00+00:00",
             "sql_hash": "hash",
@@ -178,7 +176,6 @@ class AutonomousSafetyTests(unittest.TestCase):
             "columns": [{"name": "revenue", "type_oid": 701}],
             "preview": [],
             "profile": [],
-            "complete": True,
             "has_limit": False,
             "expires_at": "2030-01-01T00:00:00+00:00",
             "sql_hash": "hash",

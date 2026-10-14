@@ -19,6 +19,7 @@ def get_pool(database_url: str) -> ConnectionPool:
                 min_size=1,
                 max_size=int(os.getenv("DATABASE_POOL_SIZE", "5")),
                 kwargs={"row_factory": dict_row},
+                check=ConnectionPool.check_connection,
                 open=False,
             )
             pool.open(wait=True, timeout=30)

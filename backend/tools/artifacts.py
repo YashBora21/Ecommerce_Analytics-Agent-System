@@ -39,12 +39,9 @@ def setup_artifacts(connection: psycopg.Connection) -> None:
             artifact_id uuid PRIMARY KEY,
             owner_id text NOT NULL,
             relation_name text NOT NULL UNIQUE,
-            sql_hash text NOT NULL,
             row_count bigint NOT NULL,
             byte_size bigint NOT NULL,
             columns_json jsonb NOT NULL,
-            preview_json jsonb NOT NULL,
-            complete boolean NOT NULL DEFAULT true,
             has_limit boolean NOT NULL DEFAULT false,
             created_at timestamptz NOT NULL DEFAULT now(),
             expires_at timestamptz NOT NULL
@@ -56,7 +53,10 @@ def setup_artifacts(connection: psycopg.Connection) -> None:
         ALTER TABLE {ARTIFACT_SCHEMA}.artifacts
             ADD COLUMN IF NOT EXISTS has_limit boolean NOT NULL DEFAULT false,
             DROP COLUMN IF EXISTS source_sql,
-            DROP COLUMN IF EXISTS profile_json
+            DROP COLUMN IF EXISTS profile_json,
+            DROP COLUMN IF EXISTS sql_hash,
+            DROP COLUMN IF EXISTS preview_json,
+            DROP COLUMN IF EXISTS complete
         """
     )
     connection.execute(
@@ -105,9 +105,9 @@ def owned_artifacts(owner_id: str) -> list[dict[str, Any]]:
         rows = connection.execute(
             f"""
             SELECT artifact_id, relation_name, row_count, byte_size, columns_json,
-                   complete, has_limit, expires_at
+                   has_limit, expires_at
             FROM {ARTIFACT_SCHEMA}.artifacts
-            WHERE owner_id = %s AND complete AND expires_at > now()
+            WHERE owner_id = %s AND expires_at > now()
             ORDER BY created_at
             """,
             (owner_id,),
@@ -130,10 +130,10 @@ def owned_artifact(
         row = connection.execute(
             f"""
             SELECT artifact_id, relation_name, row_count, byte_size, columns_json,
-                   complete, has_limit, expires_at
+                   has_limit, expires_at
             FROM {ARTIFACT_SCHEMA}.artifacts
             WHERE artifact_id = %s AND owner_id = %s
-              AND complete AND expires_at > now()
+              AND expires_at > now()
             """,
             (artifact_key, owner_id),
         ).fetchone()
@@ -224,19 +224,17 @@ def materialize_result(
             connection.execute(
                 f"""
                 INSERT INTO {ARTIFACT_SCHEMA}.artifacts
-                    (artifact_id, owner_id, relation_name, sql_hash, row_count,
-                     byte_size, columns_json, preview_json, has_limit, expires_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s)
+                    (artifact_id, owner_id, relation_name, row_count, byte_size,
+                     columns_json, has_limit, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                 """,
                 (
                     artifact_id,
                     owner_id,
                     relation_name,
-                    analysis["sql_hash"],
                     row_count,
                     byte_size,
                     json.dumps(columns, default=str),
-                    json.dumps(preview, default=str),
                     has_limit,
                     expires_at,
                 ),
@@ -251,7 +249,6 @@ def materialize_result(
         "byte_size": byte_size,
         "columns": columns,
         "preview": preview,
-        "complete": True,
         "has_limit": has_limit,
         "expires_at": expires_at.isoformat(),
         "sql_hash": analysis["sql_hash"],

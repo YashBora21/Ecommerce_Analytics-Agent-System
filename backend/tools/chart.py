@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 
 SUPPORTED_CHARTS = {"bar", "line", "scatter", "pie", "heatmap", "treemap"}
 MAX_CHART_POINTS = 100
+MAX_BAR_POINTS = 15
 MAX_PIE_SLICES = 20
 MAX_HEATMAP_CELLS = 400
 MAX_TREEMAP_LEAVES = 100
@@ -110,6 +111,8 @@ def create_chart(
             if column not in column_names:
                 raise ValueError(f"Column not found: {column}")
         row_limit = {
+            "bar": MAX_BAR_POINTS,
+            "pie": MAX_PIE_SLICES,
             "heatmap": MAX_HEATMAP_CELLS,
             "treemap": MAX_TREEMAP_LEAVES,
         }.get(chart_type, MAX_CHART_POINTS)
@@ -146,8 +149,9 @@ def create_chart(
         trace = _treemap(rows, path_columns or [], value_column)
     else:
         _require_columns(rows, [x_column, y_column])
-        if len(rows) > MAX_CHART_POINTS:
-            raise ValueError(f"Chart exceeds {MAX_CHART_POINTS} points")
+        point_limit = MAX_BAR_POINTS if chart_type == "bar" else MAX_CHART_POINTS
+        if len(rows) > point_limit:
+            raise ValueError(f"Chart exceeds {point_limit} points")
         x_values = [row[x_column] for row in rows]
         y_values = _numbers(rows, y_column)
         if chart_type == "pie" and len(set(x_values)) > MAX_PIE_SLICES:

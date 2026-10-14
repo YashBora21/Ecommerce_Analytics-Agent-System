@@ -20,7 +20,6 @@ def _owned_artifact(state: QueryState, artifact_id: str) -> dict | None:
             artifact
             for artifact in state.get("artifacts", [])
             if artifact.get("artifact_id") == artifact_id
-            and artifact.get("complete")
         ),
         None,
     )
